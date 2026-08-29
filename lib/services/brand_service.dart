@@ -10,6 +10,18 @@ import 'settings_service.dart';
 class BrandService {
   BrandService(this.paths, this.settings);
 
+  static const supportedFontTypes = XTypeGroup(
+    label: '字体（TTF / OTF）',
+    extensions: <String>['ttf', 'otf'],
+    mimeTypes: <String>[
+      'font/ttf',
+      'font/otf',
+      'application/x-font-ttf',
+      'application/x-font-opentype',
+    ],
+    uniformTypeIdentifiers: <String>['public.font'],
+  );
+
   final AppPaths paths;
   final SettingsService settings;
 
@@ -34,27 +46,14 @@ class BrandService {
 
   Future<String?> pickAndInstallFont() async {
     final picked = await openFile(
-      acceptedTypeGroups: const <XTypeGroup>[
-        XTypeGroup(
-          label: '字体',
-          extensions: <String>['ttf'],
-          mimeTypes: <String>['font/ttf'],
-          uniformTypeIdentifiers: <String>['public.truetype-ttf'],
-        ),
-      ],
+      acceptedTypeGroups: const <XTypeGroup>[supportedFontTypes],
     );
     if (picked == null) return null;
-    if (await picked.length() > 2_500_000)
-      throw const FormatException('字体文件不能超过 2.5 MB');
     final bytes = await picked.readAsBytes();
     if (bytes.length < 12) throw const FormatException('无法读取字体文件');
-    final signature = String.fromCharCodes(bytes.take(4));
-    final valid =
-        signature == 'OTTO' ||
-        signature == 'true' ||
-        signature == 'typ1' ||
-        (bytes[0] == 0 && bytes[1] == 1 && bytes[2] == 0 && bytes[3] == 0);
-    if (!valid) throw const FormatException('所选文件不是可识别的 OpenType/TrueType 字体');
+    if (!isSupportedFontData(bytes)) {
+      throw const FormatException('所选文件不是可识别的 TTF 或 OTF 字体');
+    }
     final safeName = _safeName(picked.name);
     final output = File(
       '${paths.fonts.path}${Platform.pathSeparator}$safeName',
@@ -66,7 +65,10 @@ class BrandService {
     await settings.set('customFontFamily', family);
     await settings.set(
       'customFontName',
-      picked.name.replaceFirst(RegExp(r'\.ttf$', caseSensitive: false), ''),
+      picked.name.replaceFirst(
+        RegExp(r'\.(?:ttf|otf)$', caseSensitive: false),
+        '',
+      ),
     );
     await settings.set('fontFamily', family);
     return family;
@@ -151,8 +153,10 @@ class BrandService {
       if (comma > 0) {
         try {
           final bytes = base64Decode(font.substring(comma + 1));
-          if (bytes.length <= 12 * 1024 * 1024) {
-            const name = 'legacy-custom-font.ttf';
+          if (isSupportedFontData(bytes)) {
+            final name = _fontExtension(bytes) == 'otf'
+                ? 'legacy-custom-font.otf'
+                : 'legacy-custom-font.ttf';
             await File(
               '${paths.fonts.path}${Platform.pathSeparator}$name',
             ).writeAsBytes(bytes, flush: true);
@@ -180,6 +184,20 @@ class BrandService {
       );
     await loader.load();
   }
+
+  static bool isSupportedFontData(List<int> bytes) {
+    if (bytes.length < 4) return false;
+    final signature = String.fromCharCodes(bytes.take(4));
+    return signature == 'OTTO' ||
+        signature == 'true' ||
+        signature == 'typ1' ||
+        (bytes[0] == 0 && bytes[1] == 1 && bytes[2] == 0 && bytes[3] == 0);
+  }
+
+  static String _fontExtension(List<int> bytes) =>
+      bytes.length >= 4 && String.fromCharCodes(bytes.take(4)) == 'OTTO'
+      ? 'otf'
+      : 'ttf';
 
   String _safeName(String value) {
     final clean = value

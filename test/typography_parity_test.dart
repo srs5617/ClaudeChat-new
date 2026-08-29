@@ -5,6 +5,46 @@ import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('an uploaded font family is applied to chat typography', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = AppController.visualAudit(scenario: 'chat-rich');
+    addTearDown(controller.dispose);
+    controller.settings
+      ..['customFontFamily'] = 'UploadedFont'
+      ..['customFontName'] = 'Uploaded Font'
+      ..['fontFamily'] = 'UploadedFont';
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    await tester.pump();
+
+    final composer = tester.widget<TextField>(
+      find.byKey(const Key('chat-composer-input')),
+    );
+    final userText = tester.widget<SelectableText>(
+      find.byWidgetPredicate(
+        (widget) => widget is SelectableText && widget.data == '莫西莫西',
+      ),
+    );
+    final assistant = tester.widget<MarkdownBody>(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is MarkdownBody && widget.data.contains('我现在跑在你的本地网页里'),
+      ),
+    );
+
+    expect(composer.style?.fontFamily, 'UploadedFont');
+    expect(userText.style?.fontFamily, 'UploadedFont');
+    expect(assistant.styleSheet?.p?.fontFamily, 'UploadedFont');
+  });
+
   testWidgets('legacy chat typography uses exact families and compact sizes', (
     tester,
   ) async {

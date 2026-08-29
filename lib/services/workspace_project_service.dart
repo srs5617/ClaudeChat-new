@@ -82,7 +82,8 @@ class WorkspaceProjectService {
         'svelte' => '检测到 Svelte 源码，但没有可直接运行的 HTML 入口或 build 产物。',
         'angular' => '检测到 Angular 源码，但没有可直接运行的 browser/dist 产物。',
         'node' => '检测到 npm/Node 项目，但没有可直接预览的静态 HTML 或构建产物。',
-        'flutter' => '检测到 Flutter/Dart 项目。iOS 原生构建必须使用 macOS/Xcode 和签名链，手机端只能查看、编辑和版本化源码。',
+        'flutter' =>
+          '检测到 Flutter/Dart 项目。iOS 原生构建必须使用 macOS/Xcode 和签名链，手机端只能查看、编辑和版本化源码。',
         _ => '没有找到可运行的 HTML 入口文件。',
       });
     } else if (buildManaged &&
@@ -93,17 +94,20 @@ class WorkspaceProjectService {
         '检测到需要 npm/Vite 等工具编译的 $detectedType 源码；当前移动端运行器只执行静态 Web 产物，请提供 dist/build/out 产物后再运行。',
       );
     } else if (runtime == 'python-wasm') {
-      diagnostics.add('Python 项目已准备运行；首次启动需要联网加载固定版本运行组件。');
+      diagnostics.add(
+        'Python 项目已准备运行；项目会在与其他工作区隔离的安全环境中运行，请放心。首次启动需要联网加载固定版本运行组件。',
+      );
     } else if (runtime == 'react-browser') {
-      diagnostics.add('React/JSX/TSX 项目已准备运行；首次启动需要联网加载固定版本编译组件。');
+      diagnostics.add(
+        'React/JSX/TSX 项目已准备运行；项目会在与其他工作区隔离的安全环境中运行，请放心。首次启动需要联网加载固定版本编译组件。',
+      );
     }
     return WorkspaceProjectInspection(
       detectedType: detectedType,
       runtime: runtime,
       entryFile: entry,
       runnable: runnable,
-      requiresNetwork:
-          runtime == 'python-wasm' || runtime == 'react-browser',
+      requiresNetwork: runtime == 'python-wasm' || runtime == 'react-browser',
       diagnostics: diagnostics,
     );
   }
@@ -303,6 +307,9 @@ self.onmessage = async ({ data }) => {
     const pyodide = await loadPyodide({ indexURL: data.indexURL });
     pyodide.setStdout({ batched: value => emit('stdout', value) });
     pyodide.setStderr({ batched: value => emit('stderr', value) });
+    pyodide.registerJsModule('claudechat_ui', {
+      render_html: value => emit('html', value),
+    });
     pyodide.FS.mkdirTree('/workspace');
     for (const [name, content] of Object.entries(data.files)) {
       const safe = String(name).replace(/\\/g, '/').replace(/^\/+/, '');
@@ -342,41 +349,53 @@ exec(compile(source_code, entry, 'exec'), globals_dict, globals_dict)
 };
 ''');
     final title = _escapeHtml(fallbackTitle);
-    final entryLabel = _escapeHtml(entry);
     return WorkspaceRunDocument(
       title: fallbackTitle,
       entryFile: entry,
       runtime: 'python-wasm',
       requiresNetwork: true,
       diagnostics: diagnostics,
-      html: '''<!doctype html>
+      html:
+          '''<!doctype html>
 <html><head><meta charset="utf-8"><title>$title</title>
 <style>
 :root{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
-body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
-.dot{width:9px;height:9px;border-radius:50%;background:#c27642;box-shadow:0 0 0 5px rgba(194,118,66,.12)}
-#status{font-size:13px;color:#746e68}.console{min-height:180px;white-space:pre-wrap;overflow-wrap:anywhere;background:#fff;border:1px solid #e6e0da;border-radius:13px;padding:14px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
-.stderr,.error{color:#c33}.done{color:#3d8b5f}button{margin-top:14px;border:1px solid #d9d2cb;border-radius:999px;background:transparent;padding:8px 14px;color:inherit}
-@media(prefers-color-scheme:dark){body{background:#1c1b1f;color:#f5f2ef}.console{background:#262428;border-color:#403c40}#status{color:#aaa29a}}
+html,body{margin:0;min-height:100%;background:#fff;color:#171717}
+#plain-output{box-sizing:border-box;min-height:100vh;padding:24px;white-space:pre-wrap;overflow-wrap:anywhere;font:15px/1.65 ui-monospace,SFMono-Regular,Menlo,monospace}
+#html-output{position:fixed;inset:0;width:100%;height:100%;border:0;background:#fff;display:none}
+#progress{position:fixed;inset:0;z-index:3;display:grid;place-content:center;justify-items:center;gap:12px;background:inherit;color:#746e68;font-size:13px;transition:opacity .18s ease}
+#progress.hidden{opacity:0;visibility:hidden;pointer-events:none}.spinner{width:24px;height:24px;border:2px solid rgba(194,118,66,.2);border-top-color:#c27642;border-radius:50%;animation:spin .8s linear infinite}
+#stop{position:fixed;right:18px;bottom:18px;z-index:4;width:42px;height:42px;border:1px solid rgba(201,111,71,.38);border-radius:50%;background:rgba(255,255,255,.9);color:#b95f3b;box-shadow:0 5px 18px rgba(0,0,0,.1);font-size:0}
+#stop::after{content:'';display:block;width:10px;height:10px;margin:auto;border-radius:2px;background:currentColor}#stop.hidden{display:none}.stderr,.error{color:#bd3e3e}.empty{color:#aaa29a}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media(prefers-color-scheme:dark){html,body{background:#1c1b1f;color:#f5f2ef}#html-output{background:#1c1b1f}#progress{color:#aaa29a}#stop{background:rgba(42,42,40,.92)}}
 </style></head><body>
-<header><span class="dot"></span><strong>$entryLabel</strong><span id="status">准备运行…</span></header>
-<div id="console" class="console" aria-live="polite"></div><button id="stop" type="button">终止运行</button>
+<pre id="plain-output" aria-live="polite"></pre>
+<iframe id="html-output" title="$title" sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
+<div id="progress" role="status"><span class="spinner"></span><span id="status">正在准备运行…</span></div>
+<button id="stop" type="button" aria-label="终止运行" title="终止运行">终止运行</button>
 <script id="claudechat-python-project" type="application/json">$payload</script>
 <script>
 (() => {
   const data = JSON.parse(document.getElementById('claudechat-python-project').textContent);
-  const output = document.getElementById('console');
+  const output = document.getElementById('plain-output');
+  const htmlOutput = document.getElementById('html-output');
+  const progress = document.getElementById('progress');
   const status = document.getElementById('status');
+  const stop = document.getElementById('stop');
   const worker = new Worker(URL.createObjectURL(new Blob([$workerSource], {type:'text/javascript'})));
-  const append = (text, css) => { const line=document.createElement('div'); line.className=css||''; line.textContent=text; output.appendChild(line); };
+  let hasOutput = false;
+  const reveal = () => { progress.classList.add('hidden'); };
+  const append = (text, css) => { hasOutput=true; reveal(); const line=document.createElement('span'); line.className=css||''; line.textContent=text+'\n'; output.appendChild(line); };
   worker.onmessage = ({data: message}) => {
     if (message.kind === 'status') status.textContent = message.value;
-    else if (message.kind === 'done') { status.textContent=message.value; status.className='done'; }
-    else if (message.kind === 'error') { status.textContent='运行失败'; append(message.value,'error'); }
+    else if (message.kind === 'html') { hasOutput=true; reveal(); output.style.display='none'; htmlOutput.style.display='block'; htmlOutput.srcdoc=message.value; }
+    else if (message.kind === 'done') { reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行完成，没有输出内容。'; output.className='empty'; } }
+    else if (message.kind === 'error') { reveal(); stop.classList.add('hidden'); append(message.value,'error'); }
     else append(message.value, message.kind === 'stderr' ? 'stderr' : '');
   };
-  worker.onerror = event => { status.textContent='运行时加载失败'; append(event.message || '无法启动 Python 运行时，请检查网络后重试。','error'); };
-  document.getElementById('stop').onclick = () => { worker.terminate(); status.textContent='已终止'; };
+  worker.onerror = event => { reveal(); stop.classList.add('hidden'); append(event.message || '无法启动 Python 运行时，请检查网络后重试。','error'); };
+  stop.onclick = () => { worker.terminate(); reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行已终止。'; output.className='empty'; } };
   worker.postMessage(data);
 })();
 </script></body></html>''',
@@ -424,7 +443,8 @@ body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;
       'files': files,
       'entry': entry,
     }).replaceAll('<', r'\u003c');
-    final runtime = r'''
+    final runtime =
+        r'''
 <script src="__CLAUDECHAT_REACT_RUNTIME__"></script>
 <script src="__CLAUDECHAT_REACT_DOM_RUNTIME__"></script>
 <script src="__CLAUDECHAT_BABEL_RUNTIME__"></script>
@@ -491,19 +511,24 @@ body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;
   try { load(project.entry); } catch (error) { showError(error); }
 })();
 </script>'''
-        .replaceAll('__CLAUDECHAT_REACT_RUNTIME__', reactRuntimeUrl)
-        .replaceAll('__CLAUDECHAT_REACT_DOM_RUNTIME__', reactDomRuntimeUrl)
-        .replaceAll('__CLAUDECHAT_BABEL_RUNTIME__', babelRuntimeUrl)
-        .replaceAll('__CLAUDECHAT_PROJECT_PAYLOAD__', payload);
+            .replaceAll('__CLAUDECHAT_REACT_RUNTIME__', reactRuntimeUrl)
+            .replaceAll('__CLAUDECHAT_REACT_DOM_RUNTIME__', reactDomRuntimeUrl)
+            .replaceAll('__CLAUDECHAT_BABEL_RUNTIME__', babelRuntimeUrl)
+            .replaceAll('__CLAUDECHAT_PROJECT_PAYLOAD__', payload);
     shell = shell.contains(RegExp(r'</body\s*>', caseSensitive: false))
-        ? shell.replaceFirst(RegExp(r'</body\s*>', caseSensitive: false), '$runtime</body>')
+        ? shell.replaceFirst(
+            RegExp(r'</body\s*>', caseSensitive: false),
+            '$runtime</body>',
+          )
         : '$shell$runtime';
     final titleMatch = RegExp(
       r'<title\b[^>]*>(.*?)</title\s*>',
       caseSensitive: false,
       dotAll: true,
     ).firstMatch(shell);
-    final title = (titleMatch?.group(1) ?? '').replaceAll(RegExp(r'<[^>]+>'), '').trim();
+    final title = (titleMatch?.group(1) ?? '')
+        .replaceAll(RegExp(r'<[^>]+>'), '')
+        .trim();
     return WorkspaceRunDocument(
       html: shell,
       title: title.isEmpty ? fallbackTitle : title,
@@ -578,19 +603,28 @@ body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;
     ]) {
       if (files.containsKey(preferred)) return preferred;
     }
-    final candidates = files.keys
-        .where(
-          (name) =>
-              name.toLowerCase().endsWith('.py') &&
-              !name.split('/').any(
-                (part) => part == 'test' || part == 'tests' || part.startsWith('.'),
-              ),
-        )
-        .toList()
-      ..sort((left, right) {
-        final depth = left.split('/').length.compareTo(right.split('/').length);
-        return depth != 0 ? depth : left.compareTo(right);
-      });
+    final candidates =
+        files.keys
+            .where(
+              (name) =>
+                  name.toLowerCase().endsWith('.py') &&
+                  !name
+                      .split('/')
+                      .any(
+                        (part) =>
+                            part == 'test' ||
+                            part == 'tests' ||
+                            part.startsWith('.'),
+                      ),
+            )
+            .toList()
+          ..sort((left, right) {
+            final depth = left
+                .split('/')
+                .length
+                .compareTo(right.split('/').length);
+            return depth != 0 ? depth : left.compareTo(right);
+          });
     return candidates.firstOrNull;
   }
 
@@ -602,7 +636,8 @@ body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;
         r'''<script\b[^>]*\btype\s*=\s*(?:"module"|'module'|module)[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))''',
         caseSensitive: false,
       ).firstMatch(source);
-      final reference = module?.group(1) ?? module?.group(2) ?? module?.group(3);
+      final reference =
+          module?.group(1) ?? module?.group(2) ?? module?.group(3);
       if (reference != null && reference.trim().isNotEmpty) {
         final resolved = _resolve(html, reference);
         if (files.containsKey(resolved)) return resolved;

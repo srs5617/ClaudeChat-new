@@ -97,12 +97,18 @@ void main() {
 
     expect(reactDocument, isNotNull);
     expect(reactDocument!.runtime, 'react-browser');
-    expect(reactDocument.html, contains('data-claudechat-runtime="react-browser"'));
+    expect(
+      reactDocument.html,
+      contains('data-claudechat-runtime="react-browser"'),
+    );
     expect(reactDocument.html, contains('src/main.jsx'));
     expect(pythonDocument, isNotNull);
     expect(pythonDocument!.runtime, 'python-wasm');
     expect(pythonDocument.title, 'Python test');
-    expect(pythonDocument.html, contains('<strong>main.py</strong>'));
+    expect(pythonDocument.html, contains("registerJsModule('claudechat_ui'"));
+    expect(pythonDocument.html, contains('id="html-output"'));
+    expect(pythonDocument.html, isNot(contains('class="console"')));
+    expect(pythonDocument.html, isNot(contains('<header>')));
     expect(pythonDocument.html, isNot(contains('沙箱')));
     expect(pythonDocument.html, contains('helper.py'));
   });

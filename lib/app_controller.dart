@@ -3228,7 +3228,7 @@ class AppController extends ChangeNotifier {
           ? '当前工作区还没有文件。'
           : '当前工作区已有文件：\n${capturedFiles.map((item) => '- ${item.name} (${item.type})').join('\n')}';
       final runtimeContext = inspection.runnable
-          ? '当前项目可由移动端 ${inspection.runtime} 运行器执行，入口为 ${inspection.entryFile}。'
+          ? '当前项目可由移动端 ${inspection.runtime} 运行器执行，入口为 ${inspection.entryFile}。${inspection.runtime == 'python-wasm' ? '若用户需要小游戏、工具或可视化界面，请在 Python 中使用 from claudechat_ui import render_html，并调用 render_html(自包含的 HTML/CSS/JavaScript 字符串)，运行时会像普通 HTML 项目一样全屏显示；不要只用 print 输出模拟界面。' : ''}'
           : '当前项目不能在手机本机直接构建或运行：${inspection.diagnostics.join('；')}';
       final modePrompt = switch (requestedMode) {
         'chat' => '当前为 Chat 模式：只讨论和解释，不修改文件。',
