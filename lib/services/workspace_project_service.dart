@@ -3,14 +3,18 @@ import 'dart:convert';
 class WorkspaceProjectInspection {
   const WorkspaceProjectInspection({
     required this.detectedType,
+    required this.runtime,
     required this.runnable,
+    required this.requiresNetwork,
     required this.diagnostics,
     this.entryFile,
   });
 
   final String detectedType;
+  final String runtime;
   final String? entryFile;
   final bool runnable;
+  final bool requiresNetwork;
   final List<String> diagnostics;
 }
 
@@ -19,17 +23,32 @@ class WorkspaceRunDocument {
     required this.html,
     required this.title,
     required this.entryFile,
+    required this.runtime,
+    required this.requiresNetwork,
     required this.diagnostics,
   });
 
   final String html;
   final String title;
   final String entryFile;
+  final String runtime;
+  final bool requiresNetwork;
   final List<String> diagnostics;
 }
 
 class WorkspaceProjectService {
   const WorkspaceProjectService._();
+
+  /// Pinned runtimes keep a workspace reproducible. They are downloaded by the
+  /// isolated preview on first use and then use the platform WebView cache.
+  static const pythonRuntimeIndexUrl =
+      'https://cdn.jsdelivr.net/pyodide/v0.27.7/full/';
+  static const babelRuntimeUrl =
+      'https://unpkg.com/@babel/standalone@7.26.10/babel.min.js';
+  static const reactRuntimeUrl =
+      'https://unpkg.com/react@18.3.1/umd/react.production.min.js';
+  static const reactDomRuntimeUrl =
+      'https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js';
 
   static WorkspaceProjectInspection inspect(Map<String, String> inputFiles) {
     final files = _normalized(inputFiles);
@@ -41,31 +60,50 @@ class WorkspaceProjectService {
       'angular',
       'node',
     }.contains(detectedType);
-    final entry = buildManaged ? _builtWebEntryFile(files) : _entryFile(files);
+    final builtEntry = buildManaged ? _builtWebEntryFile(files) : null;
+    final runtime = switch (detectedType) {
+      'python' => 'python-wasm',
+      'react' when builtEntry == null => 'react-browser',
+      _ => 'static-web',
+    };
+    final entry = switch (runtime) {
+      'python-wasm' => _pythonEntryFile(files),
+      'react-browser' => _reactSourceEntryFile(files),
+      _ => builtEntry ?? _entryFile(files),
+    };
     final diagnostics = <String>[];
     var runnable = entry != null;
     if (entry == null) {
       diagnostics.add(switch (detectedType) {
-        'python' => '检测到 Python 项目，但设备内 Python 运行时尚未接入。',
-        'java' => '检测到 Java 项目，但设备内 Java 运行时尚未接入。',
-        'react' => '检测到 React 源码，但没有可直接运行的 HTML 入口或 dist/build 产物。',
+        'python' => '检测到 Python 项目，但没有找到 main.py、app.py 或其他可执行 .py 入口。',
+        'java' => '检测到 Java/Gradle 项目。手机端不具备 JDK/Gradle 原生构建链，当前只能查看、编辑和版本化源码。',
+        'react' => '检测到 React 源码，但没有找到 src/main、src/index 或 HTML 中声明的模块入口。',
         'vue' => '检测到 Vue 源码，但没有可直接运行的 HTML 入口或 dist 产物。',
         'svelte' => '检测到 Svelte 源码，但没有可直接运行的 HTML 入口或 build 产物。',
         'angular' => '检测到 Angular 源码，但没有可直接运行的 browser/dist 产物。',
         'node' => '检测到 npm/Node 项目，但没有可直接预览的静态 HTML 或构建产物。',
-        'flutter' => '检测到 Flutter/Dart 项目，但设备内 Flutter/Dart 构建运行时尚未接入。',
+        'flutter' => '检测到 Flutter/Dart 项目。iOS 原生构建必须使用 macOS/Xcode 和签名链，手机端只能查看、编辑和版本化源码。',
         _ => '没有找到可运行的 HTML 入口文件。',
       });
-    } else if (buildManaged && !_isBuiltWebEntry(entry, files[entry]!)) {
+    } else if (buildManaged &&
+        runtime == 'static-web' &&
+        !_isBuiltWebEntry(entry, files[entry]!)) {
       runnable = false;
       diagnostics.add(
         '检测到需要 npm/Vite 等工具编译的 $detectedType 源码；当前移动端运行器只执行静态 Web 产物，请提供 dist/build/out 产物后再运行。',
       );
+    } else if (runtime == 'python-wasm') {
+      diagnostics.add('Python 将在与工作区隔离的 WebAssembly 沙箱中运行；首次启动需要联网下载固定版本运行时。');
+    } else if (runtime == 'react-browser') {
+      diagnostics.add('React/JSX/TSX 将在浏览器沙箱中即时编译；首次启动需要联网下载固定版本编译器。');
     }
     return WorkspaceProjectInspection(
       detectedType: detectedType,
+      runtime: runtime,
       entryFile: entry,
       runnable: runnable,
+      requiresNetwork:
+          runtime == 'python-wasm' || runtime == 'react-browser',
       diagnostics: diagnostics,
     );
   }
@@ -166,6 +204,22 @@ class WorkspaceProjectService {
     final inspection = inspect(files);
     final entry = inspection.entryFile;
     if (entry == null || !inspection.runnable) return null;
+    if (inspection.runtime == 'python-wasm') {
+      return _buildPythonDocument(
+        files,
+        entry: entry,
+        fallbackTitle: fallbackTitle,
+        diagnostics: inspection.diagnostics,
+      );
+    }
+    if (inspection.runtime == 'react-browser') {
+      return _buildReactDocument(
+        files,
+        entry: entry,
+        fallbackTitle: fallbackTitle,
+        diagnostics: inspection.diagnostics,
+      );
+    }
     final diagnostics = <String>[];
     var html = files[entry]!;
 
@@ -222,8 +276,254 @@ class WorkspaceProjectService {
       html: html,
       title: title.isEmpty ? fallbackTitle : title,
       entryFile: entry,
+      runtime: inspection.runtime,
+      requiresNetwork: inspection.requiresNetwork,
       diagnostics: diagnostics,
     );
+  }
+
+  static WorkspaceRunDocument _buildPythonDocument(
+    Map<String, String> files, {
+    required String entry,
+    required String fallbackTitle,
+    required List<String> diagnostics,
+  }) {
+    final payload = jsonEncode(<String, Object?>{
+      'files': files,
+      'entry': entry,
+      'requirements': _pythonRequirements(files),
+      'indexURL': pythonRuntimeIndexUrl,
+    }).replaceAll('<', r'\u003c');
+    final workerSource = jsonEncode(r'''
+self.onmessage = async ({ data }) => {
+  const emit = (kind, value) => self.postMessage({ kind, value: String(value ?? '') });
+  try {
+    emit('status', '正在加载 Python 运行时…');
+    importScripts(data.indexURL + 'pyodide.js');
+    const pyodide = await loadPyodide({ indexURL: data.indexURL });
+    pyodide.setStdout({ batched: value => emit('stdout', value) });
+    pyodide.setStderr({ batched: value => emit('stderr', value) });
+    pyodide.FS.mkdirTree('/workspace');
+    for (const [name, content] of Object.entries(data.files)) {
+      const safe = String(name).replace(/\\/g, '/').replace(/^\/+/, '');
+      const slash = safe.lastIndexOf('/');
+      if (slash > 0) pyodide.FS.mkdirTree('/workspace/' + safe.slice(0, slash));
+      pyodide.FS.writeFile('/workspace/' + safe, String(content), { encoding: 'utf8' });
+    }
+    emit('status', '正在准备 Python 依赖…');
+    const source = String(data.files[data.entry] || '');
+    await pyodide.loadPackagesFromImports(source);
+    if (Array.isArray(data.requirements) && data.requirements.length) {
+      await pyodide.loadPackage('micropip');
+      await pyodide.runPythonAsync(
+        'import micropip\nawait micropip.install(' + JSON.stringify(data.requirements) + ')'
+      );
+    }
+    emit('status', '正在运行 ' + data.entry);
+    pyodide.globals.set('__claudechat_entry__', '/workspace/' + data.entry);
+    await pyodide.runPythonAsync(`
+import os, sys
+entry = str(__claudechat_entry__)
+entry_dir = os.path.dirname(entry) or '/workspace'
+os.chdir(entry_dir)
+if '/workspace' not in sys.path:
+    sys.path.insert(0, '/workspace')
+if entry_dir not in sys.path:
+    sys.path.insert(0, entry_dir)
+globals_dict = {'__name__': '__main__', '__file__': entry}
+with open(entry, 'r', encoding='utf-8') as source_file:
+    source_code = source_file.read()
+exec(compile(source_code, entry, 'exec'), globals_dict, globals_dict)
+`);
+    emit('done', '运行完成');
+  } catch (error) {
+    emit('error', error && error.stack ? error.stack : error);
+  }
+};
+''');
+    final title = _escapeHtml('$fallbackTitle · Python');
+    return WorkspaceRunDocument(
+      title: '$fallbackTitle · Python',
+      entryFile: entry,
+      runtime: 'python-wasm',
+      requiresNetwork: true,
+      diagnostics: diagnostics,
+      html: '''<!doctype html>
+<html><head><meta charset="utf-8"><title>$title</title>
+<style>
+:root{color-scheme:light dark;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.dot{width:9px;height:9px;border-radius:50%;background:#c27642;box-shadow:0 0 0 5px rgba(194,118,66,.12)}
+#status{font-size:13px;color:#746e68}.console{min-height:180px;white-space:pre-wrap;overflow-wrap:anywhere;background:#fff;border:1px solid #e6e0da;border-radius:13px;padding:14px;font:13px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}
+.stderr,.error{color:#c33}.done{color:#3d8b5f}button{margin-top:14px;border:1px solid #d9d2cb;border-radius:999px;background:transparent;padding:8px 14px;color:inherit}
+@media(prefers-color-scheme:dark){body{background:#1c1b1f;color:#f5f2ef}.console{background:#262428;border-color:#403c40}#status{color:#aaa29a}}
+</style></head><body>
+<header><span class="dot"></span><strong>Python 沙箱</strong><span id="status">准备运行…</span></header>
+<div id="console" class="console" aria-live="polite"></div><button id="stop" type="button">终止运行</button>
+<script id="claudechat-python-project" type="application/json">$payload</script>
+<script>
+(() => {
+  const data = JSON.parse(document.getElementById('claudechat-python-project').textContent);
+  const output = document.getElementById('console');
+  const status = document.getElementById('status');
+  const worker = new Worker(URL.createObjectURL(new Blob([$workerSource], {type:'text/javascript'})));
+  const append = (text, css) => { const line=document.createElement('div'); line.className=css||''; line.textContent=text; output.appendChild(line); };
+  worker.onmessage = ({data: message}) => {
+    if (message.kind === 'status') status.textContent = message.value;
+    else if (message.kind === 'done') { status.textContent=message.value; status.className='done'; }
+    else if (message.kind === 'error') { status.textContent='运行失败'; append(message.value,'error'); }
+    else append(message.value, message.kind === 'stderr' ? 'stderr' : '');
+  };
+  worker.onerror = event => { status.textContent='运行时加载失败'; append(event.message || '无法启动 Python 运行时，请检查网络后重试。','error'); };
+  document.getElementById('stop').onclick = () => { worker.terminate(); status.textContent='已终止'; };
+  worker.postMessage(data);
+})();
+</script></body></html>''',
+    );
+  }
+
+  static WorkspaceRunDocument _buildReactDocument(
+    Map<String, String> files, {
+    required String entry,
+    required String fallbackTitle,
+    required List<String> diagnostics,
+  }) {
+    final htmlEntry = _entryFile(files);
+    var shell = htmlEntry == null
+        ? '<!doctype html><html><head><meta charset="utf-8"><title>${_escapeHtml(fallbackTitle)}</title></head><body><div id="root"></div></body></html>'
+        : files[htmlEntry]!;
+    shell = shell.replaceAllMapped(
+      RegExp(
+        r'''<script\b[^>]*\btype\s*=\s*(?:"module"|'module'|module)[^>]*>\s*</script\s*>''',
+        caseSensitive: false,
+      ),
+      (_) => '',
+    );
+    if (htmlEntry != null) {
+      shell = shell.replaceAllMapped(
+        RegExp(r'<link\b[^>]*>', caseSensitive: false),
+        (match) {
+          final tag = match.group(0)!;
+          final rel = _attribute(tag, 'rel').toLowerCase();
+          final href = _attribute(tag, 'href');
+          if (!rel.split(RegExp(r'\s+')).contains('stylesheet') ||
+              href.isEmpty ||
+              _isExternal(href)) {
+            return tag;
+          }
+          final resolved = _resolve(htmlEntry, href);
+          final css = files[resolved];
+          return css == null
+              ? tag
+              : '<style data-claudechat-source="${_escapeAttribute(resolved)}">${css.replaceAll('</style', r'<\/style')}</style>';
+        },
+      );
+    }
+    final payload = jsonEncode(<String, Object?>{
+      'files': files,
+      'entry': entry,
+    }).replaceAll('<', r'\u003c');
+    final runtime = r'''
+<script src="__CLAUDECHAT_REACT_RUNTIME__"></script>
+<script src="__CLAUDECHAT_REACT_DOM_RUNTIME__"></script>
+<script src="__CLAUDECHAT_BABEL_RUNTIME__"></script>
+<script id="claudechat-react-project" type="application/json">__CLAUDECHAT_PROJECT_PAYLOAD__</script>
+<script data-claudechat-runtime="react-browser">
+(() => {
+  const project = JSON.parse(document.getElementById('claudechat-react-project').textContent);
+  const files = project.files;
+  const cache = Object.create(null);
+  const extensions = ['', '.js', '.jsx', '.ts', '.tsx', '.mjs', '.json', '.css', '.svg', '.png', '.jpg', '.jpeg', '.gif', '.webp'];
+  const normalize = value => {
+    const parts=[];
+    for (const part of String(value).replace(/\\/g,'/').split('/')) {
+      if (!part || part === '.') continue;
+      if (part === '..') parts.pop(); else parts.push(part);
+    }
+    return parts.join('/');
+  };
+  const resolve = (from, request) => {
+    if (!request.startsWith('.') && !request.startsWith('/')) return request;
+    const base = request.startsWith('/') ? '' : from.slice(0, Math.max(0, from.lastIndexOf('/') + 1));
+    const raw = normalize(base + request);
+    for (const extension of extensions) {
+      if (Object.prototype.hasOwnProperty.call(files, raw + extension)) return raw + extension;
+    }
+    for (const extension of extensions.slice(1)) {
+      if (Object.prototype.hasOwnProperty.call(files, raw + '/index' + extension)) return raw + '/index' + extension;
+    }
+    throw new Error('找不到模块：' + request + '（来自 ' + from + '）');
+  };
+  const external = request => {
+    if (request === 'react') return window.React;
+    if (request === 'react-dom') return window.ReactDOM;
+    if (request === 'react-dom/client') return { createRoot: window.ReactDOM.createRoot.bind(window.ReactDOM), hydrateRoot: window.ReactDOM.hydrateRoot && window.ReactDOM.hydrateRoot.bind(window.ReactDOM) };
+    if (request === 'react/jsx-runtime' || request === 'react/jsx-dev-runtime') return window.React;
+    throw new Error('移动端沙箱尚未内置 npm 依赖：' + request + '。请改用本地模块或提交 dist/build 产物。');
+  };
+  const load = path => {
+    if (!path.startsWith('.') && !path.startsWith('/') && !Object.prototype.hasOwnProperty.call(files, path)) return external(path);
+    path = normalize(path);
+    if (cache[path]) return cache[path].exports;
+    if (path.endsWith('.css')) { const style=document.createElement('style'); style.dataset.claudechatSource=path; style.textContent=files[path]; document.head.appendChild(style); return {}; }
+    if (path.endsWith('.json')) return JSON.parse(files[path]);
+    if (/\.(?:svg|png|jpe?g|gif|webp)$/.test(path)) {
+      const mime = path.endsWith('.svg') ? 'image/svg+xml' : 'image/' + path.split('.').pop().replace('jpg','jpeg');
+      return String(files[path]).startsWith('data:') ? files[path] : 'data:' + mime + ';charset=utf-8,' + encodeURIComponent(files[path]);
+    }
+    const module = {exports:{}}; cache[path]=module;
+    let source = String(files[path] ?? '')
+      .replace(/import\.meta\.env\.DEV/g, 'true')
+      .replace(/import\.meta\.env\.PROD/g, 'false')
+      .replace(/import\.meta\.env\.MODE/g, '"development"');
+    const presets = [['env',{modules:'commonjs'}], ['react',{runtime:'classic'}]];
+    if (/\.(?:ts|tsx)$/.test(path)) presets.push(['typescript',{allExtensions:true,isTSX:path.endsWith('.tsx')}]);
+    const code = Babel.transform(source, {filename:path, sourceType:'module', presets}).code;
+    const localRequire = request => load(resolve(path, request));
+    const execute = new Function('require','module','exports','process','__filename','__dirname', code + '\n//# sourceURL=claudechat-workspace://' + path);
+    execute(localRequire, module, module.exports, {env:{NODE_ENV:'development'}}, path, path.includes('/') ? path.slice(0,path.lastIndexOf('/')) : '');
+    return module.exports;
+  };
+  const showError = error => {
+    const box=document.createElement('pre'); box.style.cssText='white-space:pre-wrap;margin:16px;padding:14px;border:1px solid #d66;border-radius:12px;color:#b22;background:rgba(180,30,30,.06)'; box.textContent=error && error.stack ? error.stack : String(error); document.body.prepend(box);
+  };
+  try { load(project.entry); } catch (error) { showError(error); }
+})();
+</script>'''
+        .replaceAll('__CLAUDECHAT_REACT_RUNTIME__', reactRuntimeUrl)
+        .replaceAll('__CLAUDECHAT_REACT_DOM_RUNTIME__', reactDomRuntimeUrl)
+        .replaceAll('__CLAUDECHAT_BABEL_RUNTIME__', babelRuntimeUrl)
+        .replaceAll('__CLAUDECHAT_PROJECT_PAYLOAD__', payload);
+    shell = shell.contains(RegExp(r'</body\s*>', caseSensitive: false))
+        ? shell.replaceFirst(RegExp(r'</body\s*>', caseSensitive: false), '$runtime</body>')
+        : '$shell$runtime';
+    final titleMatch = RegExp(
+      r'<title\b[^>]*>(.*?)</title\s*>',
+      caseSensitive: false,
+      dotAll: true,
+    ).firstMatch(shell);
+    final title = (titleMatch?.group(1) ?? '').replaceAll(RegExp(r'<[^>]+>'), '').trim();
+    return WorkspaceRunDocument(
+      html: shell,
+      title: title.isEmpty ? fallbackTitle : title,
+      entryFile: entry,
+      runtime: 'react-browser',
+      requiresNetwork: true,
+      diagnostics: diagnostics,
+    );
+  }
+
+  static List<String> _pythonRequirements(Map<String, String> files) {
+    final source = files.entries
+        .where((entry) => entry.key.toLowerCase().endsWith('requirements.txt'))
+        .map((entry) => entry.value)
+        .firstOrNull;
+    if (source == null) return const <String>[];
+    return source
+        .split(RegExp(r'\r?\n'))
+        .map((line) => line.split('#').first.trim())
+        .where((line) => line.isNotEmpty && !line.startsWith('-'))
+        .toList(growable: false);
   }
 
   static Map<String, String> _normalized(
@@ -264,7 +564,66 @@ class WorkspaceProjectService {
     ]) {
       if (files.containsKey(preferred)) return preferred;
     }
-    return _entryFile(files);
+    return null;
+  }
+
+  static String? _pythonEntryFile(Map<String, String> files) {
+    for (final preferred in const <String>[
+      'main.py',
+      'app.py',
+      'src/main.py',
+      'src/app.py',
+      '__main__.py',
+    ]) {
+      if (files.containsKey(preferred)) return preferred;
+    }
+    final candidates = files.keys
+        .where(
+          (name) =>
+              name.toLowerCase().endsWith('.py') &&
+              !name.split('/').any(
+                (part) => part == 'test' || part == 'tests' || part.startsWith('.'),
+              ),
+        )
+        .toList()
+      ..sort((left, right) {
+        final depth = left.split('/').length.compareTo(right.split('/').length);
+        return depth != 0 ? depth : left.compareTo(right);
+      });
+    return candidates.firstOrNull;
+  }
+
+  static String? _reactSourceEntryFile(Map<String, String> files) {
+    final html = _entryFile(files);
+    if (html != null) {
+      final source = files[html]!;
+      final module = RegExp(
+        r'''<script\b[^>]*\btype\s*=\s*(?:"module"|'module'|module)[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))''',
+        caseSensitive: false,
+      ).firstMatch(source);
+      final reference = module?.group(1) ?? module?.group(2) ?? module?.group(3);
+      if (reference != null && reference.trim().isNotEmpty) {
+        final resolved = _resolve(html, reference);
+        if (files.containsKey(resolved)) return resolved;
+      }
+    }
+    for (final preferred in const <String>[
+      'src/main.tsx',
+      'src/main.jsx',
+      'src/index.tsx',
+      'src/index.jsx',
+      'src/main.ts',
+      'src/main.js',
+      'src/index.ts',
+      'src/index.js',
+      'main.tsx',
+      'main.jsx',
+      'index.tsx',
+      'index.jsx',
+    ]) {
+      if (files.containsKey(preferred)) return preferred;
+    }
+    return null;
   }
 
   static bool _isBuiltWebEntry(String entry, String html) {
@@ -323,6 +682,11 @@ class WorkspaceProjectService {
   static String _escapeAttribute(String value) => value
       .replaceAll('&', '&amp;')
       .replaceAll('"', '&quot;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;');
+
+  static String _escapeHtml(String value) => value
+      .replaceAll('&', '&amp;')
       .replaceAll('<', '&lt;')
       .replaceAll('>', '&gt;');
 }

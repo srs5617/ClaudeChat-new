@@ -62,7 +62,7 @@ void main() {
     expect(result.html, contains('dataset.ready'));
   });
 
-  test('does not claim uncompiled React or Python source is runnable', () {
+  test('builds isolated mobile runtimes for React source and Python', () {
     final react = WorkspaceProjectService.inspect(<String, String>{
       'package.json': '{"dependencies":{"react":"latest"}}',
       'index.html': '<script type="module" src="/src/main.jsx"></script>',
@@ -73,11 +73,36 @@ void main() {
     });
 
     expect(react.detectedType, 'react');
-    expect(react.runnable, isFalse);
-    expect(react.diagnostics.single, contains('编译'));
+    expect(react.runtime, 'react-browser');
+    expect(react.entryFile, 'src/main.jsx');
+    expect(react.runnable, isTrue);
+    expect(react.requiresNetwork, isTrue);
     expect(python.detectedType, 'python');
-    expect(python.runnable, isFalse);
-    expect(python.diagnostics.single, contains('Python 运行时'));
+    expect(python.runtime, 'python-wasm');
+    expect(python.entryFile, 'main.py');
+    expect(python.runnable, isTrue);
+    expect(python.requiresNetwork, isTrue);
+
+    final reactDocument = WorkspaceProjectService.build(<String, String>{
+      'package.json': '{"dependencies":{"react":"latest"}}',
+      'index.html':
+          '<div id="root"></div><script type="module" src="/src/main.jsx"></script>',
+      'src/main.jsx':
+          'import React from "react"; import {createRoot} from "react-dom/client"; createRoot(document.getElementById("root")).render(<b>hello</b>);',
+    }, fallbackTitle: 'React test');
+    final pythonDocument = WorkspaceProjectService.build(<String, String>{
+      'main.py': 'from helper import value\nprint(value)',
+      'helper.py': 'value = 42',
+    }, fallbackTitle: 'Python test');
+
+    expect(reactDocument, isNotNull);
+    expect(reactDocument!.runtime, 'react-browser');
+    expect(reactDocument.html, contains('data-claudechat-runtime="react-browser"'));
+    expect(reactDocument.html, contains('src/main.jsx'));
+    expect(pythonDocument, isNotNull);
+    expect(pythonDocument!.runtime, 'python-wasm');
+    expect(pythonDocument.html, contains('Python 沙箱'));
+    expect(pythonDocument.html, contains('helper.py'));
   });
 
   test('prefers a built React entry when source and dist coexist', () {
@@ -92,6 +117,7 @@ void main() {
 
     expect(inspection.entryFile, 'dist/index.html');
     expect(inspection.runnable, isTrue);
+    expect(inspection.runtime, 'static-web');
   });
 
   test('npm framework source needs a static build product', () {

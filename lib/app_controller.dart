@@ -3227,6 +3227,9 @@ class AppController extends ChangeNotifier {
       final fileContext = capturedFiles.isEmpty
           ? '当前工作区还没有文件。'
           : '当前工作区已有文件：\n${capturedFiles.map((item) => '- ${item.name} (${item.type})').join('\n')}';
+      final runtimeContext = inspection.runnable
+          ? '当前项目可由移动端 ${inspection.runtime} 运行器执行，入口为 ${inspection.entryFile}。'
+          : '当前项目不能在手机本机直接构建或运行：${inspection.diagnostics.join('；')}';
       final modePrompt = switch (requestedMode) {
         'chat' => '当前为 Chat 模式：只讨论和解释，不修改文件。',
         'plan' => '当前为 Plan 模式：可以读取文件来制定方案，但不能修改文件。',
@@ -3235,7 +3238,7 @@ class AppController extends ChangeNotifier {
       final systemPrompt =
           '${capturedAppSettings['systemPrompt'] ?? ''}\n\n你正在名为“${workspace.name}”的 $effectiveType 项目工作区中。'
           '${workspace.projectType == 'auto' ? '项目类型由当前文件自动识别为 $detectedType。' : ''}'
-          '\n$modePrompt\n$fileContext\n开始处理一个包含多个步骤的任务时，先调用 update_workspace_plan 提交目标计划；开始某一步时把它改为 running，完成后改为 completed。计划不得混入“正在分析任务、正在组织回复”等实时过程。\n工具返回 ok=false、error 或缺少 verified=true 时必须向用户说明失败，不得声称操作成功。创建或编辑成功后，请继续使用回执中的精确文件名。';
+          '\n$modePrompt\n$fileContext\n$runtimeContext\n开始处理一个包含多个步骤的任务时，先调用 update_workspace_plan 提交目标计划；开始某一步时把它改为 running，完成后改为 completed。计划不得混入“正在分析任务、正在组织回复”等实时过程。\n工具返回 ok=false、error 或缺少 verified=true 时必须向用户说明失败，不得声称操作成功。创建或编辑成功后，请继续使用回执中的精确文件名。';
       final budget = capturedContextBudget;
       final trimmedWorkspace = budget == null
           ? ContextTrim(messages: synthetic, dropped: 0)
