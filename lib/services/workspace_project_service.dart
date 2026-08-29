@@ -93,9 +93,9 @@ class WorkspaceProjectService {
         '检测到需要 npm/Vite 等工具编译的 $detectedType 源码；当前移动端运行器只执行静态 Web 产物，请提供 dist/build/out 产物后再运行。',
       );
     } else if (runtime == 'python-wasm') {
-      diagnostics.add('Python 将在与工作区隔离的 WebAssembly 沙箱中运行；首次启动需要联网下载固定版本运行时。');
+      diagnostics.add('Python 项目已准备运行；首次启动需要联网加载固定版本运行组件。');
     } else if (runtime == 'react-browser') {
-      diagnostics.add('React/JSX/TSX 将在浏览器沙箱中即时编译；首次启动需要联网下载固定版本编译器。');
+      diagnostics.add('React/JSX/TSX 项目已准备运行；首次启动需要联网加载固定版本编译组件。');
     }
     return WorkspaceProjectInspection(
       detectedType: detectedType,
@@ -341,9 +341,10 @@ exec(compile(source_code, entry, 'exec'), globals_dict, globals_dict)
   }
 };
 ''');
-    final title = _escapeHtml('$fallbackTitle · Python');
+    final title = _escapeHtml(fallbackTitle);
+    final entryLabel = _escapeHtml(entry);
     return WorkspaceRunDocument(
-      title: '$fallbackTitle · Python',
+      title: fallbackTitle,
       entryFile: entry,
       runtime: 'python-wasm',
       requiresNetwork: true,
@@ -358,7 +359,7 @@ body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;
 .stderr,.error{color:#c33}.done{color:#3d8b5f}button{margin-top:14px;border:1px solid #d9d2cb;border-radius:999px;background:transparent;padding:8px 14px;color:inherit}
 @media(prefers-color-scheme:dark){body{background:#1c1b1f;color:#f5f2ef}.console{background:#262428;border-color:#403c40}#status{color:#aaa29a}}
 </style></head><body>
-<header><span class="dot"></span><strong>Python 沙箱</strong><span id="status">准备运行…</span></header>
+<header><span class="dot"></span><strong>$entryLabel</strong><span id="status">准备运行…</span></header>
 <div id="console" class="console" aria-live="polite"></div><button id="stop" type="button">终止运行</button>
 <script id="claudechat-python-project" type="application/json">$payload</script>
 <script>
@@ -459,7 +460,7 @@ body{margin:0;padding:18px;background:#f9f9f7;color:#171717}header{display:flex;
     if (request === 'react-dom') return window.ReactDOM;
     if (request === 'react-dom/client') return { createRoot: window.ReactDOM.createRoot.bind(window.ReactDOM), hydrateRoot: window.ReactDOM.hydrateRoot && window.ReactDOM.hydrateRoot.bind(window.ReactDOM) };
     if (request === 'react/jsx-runtime' || request === 'react/jsx-dev-runtime') return window.React;
-    throw new Error('移动端沙箱尚未内置 npm 依赖：' + request + '。请改用本地模块或提交 dist/build 产物。');
+    throw new Error('当前移动端运行环境尚未内置 npm 依赖：' + request + '。请改用本地模块或提交 dist/build 产物。');
   };
   const load = path => {
     if (!path.startsWith('.') && !path.startsWith('/') && !Object.prototype.hasOwnProperty.call(files, path)) return external(path);

@@ -101,7 +101,9 @@ void main() {
     expect(reactDocument.html, contains('src/main.jsx'));
     expect(pythonDocument, isNotNull);
     expect(pythonDocument!.runtime, 'python-wasm');
-    expect(pythonDocument.html, contains('Python 沙箱'));
+    expect(pythonDocument.title, 'Python test');
+    expect(pythonDocument.html, contains('<strong>main.py</strong>'));
+    expect(pythonDocument.html, isNot(contains('沙箱')));
     expect(pythonDocument.html, contains('helper.py'));
   });
 

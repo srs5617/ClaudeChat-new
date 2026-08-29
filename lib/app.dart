@@ -10240,17 +10240,17 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
 
   String _workspaceCapability(String type) => switch (type) {
     'react' =>
-      'React / JSX / TSX 可在 Android 与 iOS 的隔离浏览器沙箱中即时编译运行；首次运行需联网加载固定版本编译器。React 核心依赖已支持，其他 npm 包需提交 dist/build 产物。',
+      'React / JSX / TSX 可在 Android 与 iOS 直接编译运行；首次运行需联网加载固定版本编译组件。React 核心依赖已支持，其他 npm 包需提交 dist/build 产物。',
     'vue' || 'svelte' || 'angular' || 'node' =>
       '可保存、编辑和版本化该项目；完整 npm/Vite/Node 构建链不能原样运行在 iOS，存在 dist/build/out 静态产物时可跨平台运行。',
     'flutter' =>
       '可保存、编辑和版本化 Flutter/Dart 项目；原生应用仍需桌面 Flutter SDK 与 macOS/Xcode 签名构建，手机端不伪装成本机构建。',
     'python' =>
-      'Python 可在 Android 与 iOS 的隔离 WebAssembly 沙箱中运行，支持工作区本地模块及兼容的 requirements.txt 依赖；首次运行需联网加载固定版本运行时。',
+      'Python 可在 Android 与 iOS 直接运行，支持工作区本地模块及兼容的 requirements.txt 依赖；首次运行需联网加载固定版本运行组件。',
     'java' =>
       '可保存、编辑和版本化 Java/Gradle 项目；手机端没有完整 JDK/Gradle/iOS 签名链，当前不伪装成本机构建。',
     'general' => '当前文件不足以识别项目类型；继续添加文件后会自动重新识别。',
-    _ => 'HTML / CSS / JavaScript 可直接在隔离预览中运行，并按工作区保留运行状态。',
+    _ => 'HTML / CSS / JavaScript 可直接运行，并按工作区保留运行状态。',
   };
 
   Future<void> _editWorkspaceInfo(BuildContext context) async {
