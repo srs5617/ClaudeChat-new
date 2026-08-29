@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center_vertical"
+    android:padding="18dp"
+    android:background="@drawable/claudechat_widget_background">
+    <TextView
+        android:id="@+id/widget_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="ClaudeChat"
+        android:textColor="#2F2A26"
+        android:textStyle="bold"
+        android:textSize="17sp" />
+    <TextView
+        android:id="@+id/widget_body"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="7dp"
+        android:text="今天想聊些什么？"
+        android:textColor="#716A63"
+        android:textSize="13sp"
+        android:maxLines="3" />
+</LinearLayout>

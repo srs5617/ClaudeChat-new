@@ -1,0 +1,60 @@
+name: claudechat
+description: "ClaudeChat - a local-first cross-platform AI companion."
+publish_to: 'none'
+version: 0.2.0+3
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  archive: ^4.0.9
+  cryptography: ^2.9.0
+  file_selector: ^1.1.0
+  flutter:
+    sdk: flutter
+  flutter_local_notifications: ^22.3.0
+  flutter_markdown_plus: ^1.0.12
+  flutter_markdown_plus_latex: ^1.0.5
+  # Pin the latest stable major. Version 11 currently hard-codes an Android
+  # SDK target that is not addressable by the stable Android toolchain.
+  flutter_secure_storage: 10.3.1
+  http: ^1.6.0
+  image_picker: ^1.2.3
+  intl: ^0.20.3
+  markdown: ^7.3.1
+  mime: ^2.0.0
+  path_provider: ^2.1.6
+  share_plus: ^13.3.0
+  shared_preferences: ^2.5.5
+  sqflite: ^2.4.3
+  timezone: ^0.11.1
+  url_launcher: ^6.3.2
+  uuid: ^4.6.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/icons/
+  fonts:
+    - family: DMSans
+      fonts:
+        - asset: assets/fonts/DMSans-Regular.ttf
+    - family: PlusJakartaSans
+      fonts:
+        - asset: assets/fonts/PlusJakartaSans-Regular.ttf
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/Lora-Regular.ttf
+    - family: Newsreader
+      fonts:
+        - asset: assets/fonts/Newsreader-VariableFont_opsz,wght.ttf
+        - asset: assets/fonts/Newsreader-Italic-VariableFont_opsz,wght.ttf
+          style: italic
+    - family: SourceSerif4
+      fonts:
+        - asset: assets/fonts/SourceSerif4-Regular.ttf

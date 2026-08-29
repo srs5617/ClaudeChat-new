@@ -1,0 +1,35 @@
+{
+    "name": "ClaudeChat",
+    "short_name": "ClaudeChat",
+    "start_url": ".",
+    "display": "standalone",
+    "background_color": "#FFF8F3",
+    "theme_color": "#D86F4B",
+    "description": "A local-first AI chat and mobile coding workspace.",
+    "orientation": "portrait-primary",
+    "prefer_related_applications": false,
+    "icons": [
+        {
+            "src": "icons/Icon-192.png",
+            "sizes": "192x192",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-512.png",
+            "sizes": "512x512",
+            "type": "image/png"
+        },
+        {
+            "src": "icons/Icon-maskable-192.png",
+            "sizes": "192x192",
+            "type": "image/png",
+            "purpose": "maskable"
+        },
+        {
+            "src": "icons/Icon-maskable-512.png",
+            "sizes": "512x512",
+            "type": "image/png",
+            "purpose": "maskable"
+        }
+    ]
+}
