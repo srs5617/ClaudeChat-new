@@ -111,6 +111,10 @@ void main() {
     expect(pythonDocument.html, isNot(contains('<header>')));
     expect(pythonDocument.html, isNot(contains('沙箱')));
     expect(pythonDocument.html, contains('helper.py'));
+    expect(pythonDocument.html, contains('pyodide.mjs'));
+    expect(pythonDocument.html, contains("type:'module'"));
+    expect(pythonDocument.html, contains('长时间没有响应'));
+    expect(pythonDocument.html, isNot(contains('importScripts')));
   });
 
   test('prefers a built React entry when source and dist coexist', () {

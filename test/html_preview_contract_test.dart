@@ -10,6 +10,8 @@ void main() {
     expect(source, contains('document.title ||'));
     expect(source, contains('fallbackTitle'));
     expect(source, contains('tap.numberOfTapsRequired > 1'));
+    expect(source, contains('worker-src blob: data:'));
+    expect(source, contains('script-src http: https: data: blob:'));
     expect(source, isNot(contains('barButtonSystemItem: .done')));
     expect(source, isNot(contains('title = "安全预览"')));
   });
@@ -23,6 +25,8 @@ void main() {
     expect(source, contains('view.title.orEmpty().trim()'));
     expect(source, contains('settings.setSupportZoom(false)'));
     expect(source, contains('View.OVER_SCROLL_NEVER'));
+    expect(source, contains('worker-src blob: data:'));
+    expect(source, contains('script-src http: https: data: blob:'));
     expect(source, isNot(contains('.take(600_000)')));
     expect(source, isNot(contains('安全预览')));
   });

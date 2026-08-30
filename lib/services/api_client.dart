@@ -137,6 +137,21 @@ List<Map<String, Object?>> buildToolAwareApiMessages({
 }
 
 class ApiClient {
+  static const Set<String> _fileToolNames = <String>{
+    'search_files',
+    'read_file',
+    'create_file',
+    'edit_file',
+    'delete_file',
+    'list_workspace_files',
+    'read_workspace_file',
+    'list_workspace_file_versions',
+    'read_workspace_file_version',
+    'restore_workspace_file_version',
+    'create_workspace_file',
+    'edit_workspace_file',
+  };
+
   ApiClient(
     this.vault, {
     http.Client? client,
@@ -976,7 +991,42 @@ class ApiClient {
     var toolDeltaCount = 0;
     int? firstEventElapsedMs;
     final lines = response.stream
-        .timeout(responseIdleTimeout)
+        .timeout(
+          responseIdleTimeout,
+          onTimeout: (sink) {
+            final activeFileTools = calls.values
+                .map((call) => call.currentName.trim())
+                .where(_fileToolNames.contains)
+                .toSet()
+                .toList(growable: false);
+            if (activeFileTools.isNotEmpty) {
+              // Large streamed file arguments can legitimately pause while
+              // the provider prepares the next chunk. Emit a zero-byte
+              // keepalive so Stream.timeout starts a fresh idle window, but
+              // only after a real file tool name has arrived. A reply that
+              // has produced neither content nor a file operation still
+              // times out normally.
+              onActivity?.call();
+              onDiagnostic?.call(
+                'response_idle_extended_for_file_tool',
+                <String, Object?>{
+                  'round': round,
+                  'toolNames': activeFileTools,
+                  'elapsedMs': requestStopwatch.elapsedMilliseconds,
+                },
+              );
+              sink.add(const <int>[]);
+              return;
+            }
+            sink.addError(
+              TimeoutException(
+                '长时间没有收到新数据',
+                responseIdleTimeout,
+              ),
+            );
+            sink.close();
+          },
+        )
         .transform(utf8.decoder)
         .transform(const LineSplitter());
     await for (final line in lines) {

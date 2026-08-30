@@ -70,6 +70,7 @@ String? _selectedFontFamily(Map<String, Object?> settings) =>
       'lora' || 'Lora' => 'Lora',
       'newsreader' || 'Newsreader' => 'Newsreader',
       'sourceSerif' || 'SourceSerif4' => 'SourceSerif4',
+      'jetbrains' || 'JetBrainsMono' => 'JetBrainsMono',
       'custom' =>
         '${settings['customFontFamily'] ?? ''}'.trim().isEmpty
             ? null
@@ -87,6 +88,26 @@ String? _displayFontFamily(Map<String, Object?> settings) =>
     '${settings['fontFamily'] ?? 'claude'}' == 'claude'
     ? 'Newsreader'
     : _selectedFontFamily(settings);
+
+bool _usesCustomFont(Map<String, Object?> settings) {
+  final custom = '${settings['customFontFamily'] ?? ''}'.trim();
+  if (custom.isEmpty) return false;
+  final selected = '${settings['fontFamily'] ?? ''}'.trim();
+  return selected == 'custom' || selected == custom;
+}
+
+String _codeFontFamily(Map<String, Object?> settings) =>
+    _usesCustomFont(settings)
+    ? '${settings['customFontFamily']}'.trim()
+    : switch ('${settings['fontFamily'] ?? 'claude'}') {
+        'claude' || 'jetbrains' || 'JetBrainsMono' => 'JetBrainsMono',
+        _ => 'monospace',
+      };
+
+String _displayLineBreaks(String value) => value
+    .replaceAll(r'\r\n', '\n')
+    .replaceAll(r'\n', '\n')
+    .replaceAll('/n', '\n');
 
 List<String>? _bodyFontFallback(Map<String, Object?> settings) =>
     '${settings['fontFamily'] ?? 'claude'}' == 'claude'
@@ -168,11 +189,12 @@ class _ClaudeChatAppState extends State<ClaudeChatApp> {
   }
 
   String _splashPhrase() {
-    final phrases = '${controller.settings['splashPhrases'] ?? ''}'
-        .split(RegExp(r'[\r\n]+'))
-        .map((value) => value.trim())
-        .where((value) => value.isNotEmpty)
-        .toList();
+    final phrases =
+        _displayLineBreaks('${controller.settings['splashPhrases'] ?? ''}')
+            .split(RegExp(r'[\r\n]+'))
+            .map((value) => value.trim())
+            .where((value) => value.isNotEmpty)
+            .toList();
     if (phrases.isEmpty) return '很高兴见到你';
     if (controller.settings['splashRandom'] != true) return phrases.first;
     return phrases[DateTime.now().millisecondsSinceEpoch % phrases.length];
@@ -754,8 +776,8 @@ class _AppShellState extends State<AppShell> {
                     const JsonEncoder.withIndent(
                       '  ',
                     ).convert(request.arguments),
-                    style: const TextStyle(
-                      fontFamily: 'monospace',
+                    style: TextStyle(
+                      fontFamily: _codeFontFamily(widget.controller.settings),
                       fontSize: 12,
                     ),
                   ),
@@ -3946,7 +3968,7 @@ class _MessageBubble extends StatelessWidget {
       h4Padding: const EdgeInsets.only(top: 11.23, bottom: 4.61),
       code: TextStyle(
         color: text,
-        fontFamily: 'monospace',
+        fontFamily: _codeFontFamily(controller.settings),
         fontSize: 13,
         backgroundColor: soft,
       ),
@@ -4158,6 +4180,7 @@ class _LegacyMarkdownContent extends StatelessWidget {
         inlineSurface,
       ),
       inlineCodeColor: inlineSurface,
+      fontFamily: _codeFontFamily(controller.settings),
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -4172,6 +4195,7 @@ class _LegacyMarkdownContent extends StatelessWidget {
             extensionSet: extensionSet ?? _legacyMarkdownExtensionSet,
             builders: <String, MarkdownElementBuilder>{
               'pre': ClaudeCodeBlockBuilder(
+                fontFamily: _codeFontFamily(controller.settings),
                 foldLines:
                     (controller.settings['codeFoldLines'] as num?)?.toInt() ??
                     5,
@@ -4888,10 +4912,16 @@ class _ToolCapsule extends StatelessWidget {
         '读取了${suffix(arguments['url'], 30)}',
       'create_file' || 'create_workspace_file' =>
         '创建了文件${quoted(arguments['name'] ?? result['name'])}',
-      'read_file' => '读取了文件${quoted(arguments['name'] ?? result['name'])}',
+      'read_file' || 'read_workspace_file' =>
+        '读取了文件${quoted(arguments['name'] ?? result['name'])}',
       'edit_file' || 'edit_workspace_file' =>
         '编辑了文件${quoted(arguments['name'] ?? result['name'])}',
       'delete_file' => '删除了文件${quoted(arguments['name'] ?? result['name'])}',
+      'list_workspace_files' => '检查了工作区文件',
+      'list_workspace_file_versions' =>
+        '查看了文件版本${quoted(arguments['name'] ?? result['name'])}',
+      'read_workspace_file_version' => '读取了文件历史版本',
+      'restore_workspace_file_version' => '恢复了文件历史版本',
       'set_greeting' => '修改了欢迎语${quoted(result['greeting'])}',
       'set_splash_phrases' => '修改了开屏语${quoted(result['phrases'])}',
       'create_memory' => '创建了记忆${quoted(arguments['content'])}',
@@ -4944,7 +4974,9 @@ class _ToolProgressCapsule extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final values = arguments is Map ? arguments! as Map : const {};
-    final rawName = '${values['name'] ?? ''}'.trim();
+    final rawName =
+        '${values['name'] ?? values['fileName'] ?? values['path'] ?? ''}'
+            .trim();
     final suffix = rawName.isEmpty ? '' : '「${_compact(rawName)}」';
     final label = switch ((name, running)) {
       ('get_time', false) => '小机子准备读取当前时间',
@@ -7783,8 +7815,10 @@ class _FilesPageState extends State<_FilesPage> {
                           ? const _LegacyEmptyContent(label: '小机子没有写入任何内容')
                           : SelectableText(
                               content,
-                              style: const TextStyle(
-                                fontFamily: 'monospace',
+                              style: TextStyle(
+                                fontFamily: _codeFontFamily(
+                                  controller.settings,
+                                ),
                                 fontSize: 12,
                                 height: 1.35,
                               ),
@@ -8081,7 +8115,7 @@ class _LegacyFileHistoryPageState extends State<_LegacyFileHistoryPage> {
                         color: Theme.of(context).brightness == Brightness.dark
                             ? _darkText
                             : _lightText,
-                        fontFamily: 'monospace',
+                        fontFamily: _codeFontFamily(widget.controller.settings),
                         fontSize: 12,
                         height: 1.4,
                       ),
@@ -9412,7 +9446,7 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
       tableHeadCellsPadding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
       tableHeadCellsDecoration: BoxDecoration(color: soft),
       code: body.copyWith(
-        fontFamily: 'monospace',
+        fontFamily: _codeFontFamily(controller.settings),
         fontSize: 11.5,
         backgroundColor: soft,
       ),
@@ -9575,6 +9609,7 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
                           content,
                           file.name,
                           dark: dark,
+                          fontFamily: _codeFontFamily(controller.settings),
                         ),
                       ),
                     ),
@@ -10487,17 +10522,18 @@ TextSpan _highlightWorkspaceSource(
   String source,
   String fileName, {
   required bool dark,
+  required String fontFamily,
 }) {
   final base = TextStyle(
-    color: dark ? const Color(0xFFD3D0CA) : const Color(0xFF2A2826),
-    fontFamily: 'monospace',
+    color: dark ? const Color(0xFFE6E1DC) : const Color(0xFF24292F),
+    fontFamily: fontFamily,
     fontSize: 11.5,
     height: 1.5,
   );
-  final keyword = dark ? const Color(0xFFFFA875) : const Color(0xFF9C4B28);
-  final string = dark ? const Color(0xFFA8C990) : const Color(0xFF496D35);
-  final comment = dark ? const Color(0xFF858079) : const Color(0xFF8C847C);
-  final number = dark ? const Color(0xFF9BC6E8) : const Color(0xFF35698F);
+  final keyword = dark ? const Color(0xFFFF9DCC) : const Color(0xFFA626A4);
+  final string = dark ? const Color(0xFFA8E6A3) : const Color(0xFF087F5B);
+  final comment = dark ? const Color(0xFF9AA4B2) : const Color(0xFF687386);
+  final number = dark ? const Color(0xFF79C0FF) : const Color(0xFF005CC5);
   final spans = <TextSpan>[];
   final pattern = RegExp(
     r'''(<!--[\s\S]*?-->|/\*[\s\S]*?\*/|//[^\n]*|#[^\n]*$)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')|\b(class|const|let|var|final|void|return|if|else|for|while|async|await|function|def|import|from|export|extends|new|true|false|null|None)\b|\b\d+(?:\.\d+)?\b''',
@@ -12504,6 +12540,7 @@ class _SettingsPageState extends State<_SettingsPage> {
       'Lora' => 'lora',
       'Newsreader' => 'newsreader',
       'SourceSerif4' => 'sourceSerif',
+      'JetBrainsMono' => 'jetbrains',
       'system' ||
       'claude' ||
       'dm' ||
@@ -12511,6 +12548,7 @@ class _SettingsPageState extends State<_SettingsPage> {
       'lora' ||
       'newsreader' ||
       'sourceSerif' => stored,
+      'jetbrains' => stored,
       'custom' => 'custom',
       _ => 'system',
     };
@@ -15098,6 +15136,7 @@ class _LegacyPreferencesSettingsPanel extends StatelessWidget {
               const ('lora', 'Lora'),
               const ('newsreader', 'Newsreader'),
               const ('sourceSerif', 'Source Serif 4'),
+              const ('jetbrains', 'JetBrains Mono'),
               (
                 'custom',
                 '${controller.settings['customFontName'] ?? ''}'.trim().isEmpty
@@ -15216,7 +15255,10 @@ class _DiagnosticsSettingsPanelState extends State<_DiagnosticsSettingsPanel> {
               padding: const EdgeInsets.all(12),
               child: SelectableText(
                 text == '[]' ? '还没有诊断事件。请先复现一次问题。' : text,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 11),
+                style: TextStyle(
+                  fontFamily: _codeFontFamily(controller.settings),
+                  fontSize: 11,
+                ),
               ),
             ),
           ),
@@ -16321,7 +16363,7 @@ MarkdownStyleSheet _legacyContentMarkdownStyle(
     h4Padding: const EdgeInsets.only(top: 11.23, bottom: 4.61),
     code: TextStyle(
       color: text,
-      fontFamily: 'monospace',
+      fontFamily: _codeFontFamily(controller.settings),
       fontSize: 13,
       backgroundColor: soft,
     ),
@@ -16373,7 +16415,9 @@ String _usageNumber(int value) {
 }
 
 String _greetingText(AppController controller) {
-  final custom = '${controller.settings['greeting'] ?? ''}'.trim();
+  final custom = _displayLineBreaks(
+    '${controller.settings['greeting'] ?? ''}',
+  ).trim();
   if (custom.isNotEmpty) return custom;
   final person = _accountName(controller);
   final hour = DateTime.now().hour;

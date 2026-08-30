@@ -201,7 +201,7 @@ class HtmlPreviewActivity : Activity() {
     }
 
     private fun securedDocument(source: String): String {
-        val policy = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src http: https: data: blob:; img-src http: https: data: blob:; media-src http: https: data: blob:\">"
+        val policy = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; worker-src blob: data:; connect-src http: https: data: blob:; img-src http: https: data: blob:; media-src http: https: data: blob:\">"
         val viewport = "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover\">"
         val interaction = "<style>html,body{overscroll-behavior:none;-webkit-text-size-adjust:100%;}</style>"
         val viewportPattern = Regex(

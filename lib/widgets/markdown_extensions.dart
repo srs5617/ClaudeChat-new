@@ -113,6 +113,7 @@ class ClaudeAnchorHtmlSyntax extends md.InlineSyntax {
 Map<String, MarkdownElementBuilder> createClaudeInlineBuilders({
   required Color highlightColor,
   required Color inlineCodeColor,
+  String fontFamily = 'monospace',
 }) => <String, MarkdownElementBuilder>{
   'sup': ClaudeScriptBuilder(superscript: true),
   'sub': ClaudeScriptBuilder(superscript: false),
@@ -123,7 +124,7 @@ Map<String, MarkdownElementBuilder> createClaudeInlineBuilders({
   'u': ClaudeStyledInlineBuilder(decoration: TextDecoration.underline),
   'kbd': ClaudeStyledInlineBuilder(
     backgroundColor: inlineCodeColor,
-    fontFamily: 'monospace',
+    fontFamily: fontFamily,
     fontWeight: FontWeight.w600,
   ),
   'small': ClaudeStyledInlineBuilder(fontScale: .84),

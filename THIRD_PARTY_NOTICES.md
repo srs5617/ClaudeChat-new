@@ -10,6 +10,7 @@ ClaudeChat bundles the following font families under the SIL Open Font License 1
 | Newsreader | https://github.com/productiontype/Newsreader |
 | Source Serif 4 | https://github.com/adobe-fonts/source-serif |
 | Noto Serif Simplified Chinese | https://github.com/notofonts/noto-cjk |
+| JetBrains Mono | https://github.com/JetBrains/JetBrainsMono |
 
 The complete SIL Open Font License text is included at [third_party_licenses/SIL-OFL-1.1.txt](third_party_licenses/SIL-OFL-1.1.txt).
 

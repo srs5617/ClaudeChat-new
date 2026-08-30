@@ -23,6 +23,22 @@ void main() {
     await tester.pump(const Duration(seconds: 1));
   });
 
+  testWidgets('literal model newline markers render as real line breaks', (
+    tester,
+  ) async {
+    final controller = AppController.visualAudit();
+    addTearDown(controller.dispose);
+    controller.settings['greeting'] = r'第一行\n第二行';
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    await tester.pump();
+
+    expect(find.text('第一行\n第二行'), findsOneWidget);
+    expect(find.text(r'第一行\n第二行'), findsNothing);
+  });
+
   testWidgets('App settings account name updates account pill and avatar', (
     tester,
   ) async {

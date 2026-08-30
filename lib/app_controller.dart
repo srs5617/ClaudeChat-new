@@ -284,6 +284,20 @@ class AppController extends ChangeNotifier {
   final ValueNotifier<int> workspaceActivity = ValueNotifier<int>(0);
   final ValueNotifier<int> chatActivity = ValueNotifier<int>(0);
   static const Duration _workspaceIdleLimit = Duration(minutes: 10);
+  static const Set<String> _fileToolNames = <String>{
+    'search_files',
+    'read_file',
+    'create_file',
+    'edit_file',
+    'delete_file',
+    'list_workspace_files',
+    'read_workspace_file',
+    'list_workspace_file_versions',
+    'read_workspace_file_version',
+    'restore_workspace_file_version',
+    'create_workspace_file',
+    'edit_workspace_file',
+  };
 
   static const _workspaceToolDefinitions = <ToolDefinition>[
     ToolDefinition(
@@ -1000,15 +1014,6 @@ class AppController extends ChangeNotifier {
   _WorkspaceRunState? get _displayWorkspaceRun =>
       _activeWorkspaceRun ?? _featuredWorkspaceRun;
 
-  WorkspaceRecord? get _displayWorkspaceRecord {
-    final active = activeWorkspace;
-    if (active != null) return active;
-    final id = _featuredWorkspaceRun?.workspaceId;
-    return id == null
-        ? null
-        : workspaces.where((item) => item.id == id).firstOrNull;
-  }
-
   bool get workspaceBusy => _displayWorkspaceRun?.busy ?? false;
   set workspaceBusy(bool value) {
     final run = _activeWorkspaceRun;
@@ -1177,18 +1182,20 @@ class AppController extends ChangeNotifier {
   }
 
   bool get workspaceTaskPersistent =>
-      _displayWorkspaceRecord?.settings['taskPersistent'] == true;
+      activeWorkspace?.settings['taskPersistent'] == true;
 
   bool get allowMultipleWorkspaceRuns =>
       activeWorkspace?.settings['allowMultipleWorkspaceRuns'] != false;
 
   String get workspaceTaskDisplayStyle =>
-      '${_displayWorkspaceRecord?.settings['taskDisplayStyle'] ?? 'top'}' ==
+      '${activeWorkspace?.settings['taskDisplayStyle'] ?? 'top'}' ==
           'ball'
       ? 'ball'
       : 'top';
 
-  bool get workspaceTaskVisible => workspaceBusy || workspaceTaskPersistent;
+  bool get workspaceTaskVisible =>
+      activeWorkspace != null &&
+      (_activeWorkspaceRun?.busy == true || workspaceTaskPersistent);
 
   String get visibleWorkspaceTaskSummary =>
       _visibleWorkspaceTaskSummaryFor(_displayWorkspaceRun);
@@ -2038,9 +2045,20 @@ class AppController extends ChangeNotifier {
     if (!busy || _generationAbort?.isCompleted != false) return;
     _generationTimeout?.cancel();
     _generationTimeout = Timer(_generationIdleLimit, () {
+      if (_isActiveFileToolProgress(streamingToolProgress)) {
+        _touchGenerationActivity();
+        return;
+      }
       _generationTimedOut = true;
       if (_generationAbort?.isCompleted == false) _generationAbort?.complete();
     });
+  }
+
+  bool _isActiveFileToolProgress(ChatCompletionPart? part) {
+    if (part == null || part.type != 'tool') return false;
+    final status = '${part.metadata['status'] ?? ''}';
+    if (status != 'preparing' && status != 'running') return false;
+    return _fileToolNames.contains('${part.metadata['name'] ?? ''}'.trim());
   }
 
   Future<void> _recordAssistantFailure(
@@ -3481,6 +3499,10 @@ class AppController extends ChangeNotifier {
     if (!run.busy || run.abort?.isCompleted != false) return;
     run.timeout?.cancel();
     run.timeout = Timer(_workspaceIdleLimit, () {
+      if (_isActiveFileToolProgress(run.streamingToolProgress)) {
+        _touchWorkspaceActivity(run);
+        return;
+      }
       run.timedOut = true;
       if (run.abort?.isCompleted == false) run.abort?.complete();
     });

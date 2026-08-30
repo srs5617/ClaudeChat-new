@@ -302,9 +302,9 @@ class WorkspaceProjectService {
 self.onmessage = async ({ data }) => {
   const emit = (kind, value) => self.postMessage({ kind, value: String(value ?? '') });
   try {
-    emit('status', '正在加载 Python 运行时…');
-    importScripts(data.indexURL + 'pyodide.js');
-    const pyodide = await loadPyodide({ indexURL: data.indexURL });
+    emit('status', '正在加载 Python 运行组件…');
+    const runtime = await import(data.indexURL + 'pyodide.mjs');
+    const pyodide = await runtime.loadPyodide({ indexURL: data.indexURL });
     pyodide.setStdout({ batched: value => emit('stdout', value) });
     pyodide.setStderr({ batched: value => emit('stderr', value) });
     pyodide.registerJsModule('claudechat_ui', {
@@ -383,20 +383,49 @@ html,body{margin:0;min-height:100%;background:#fff;color:#171717}
   const progress = document.getElementById('progress');
   const status = document.getElementById('status');
   const stop = document.getElementById('stop');
-  const worker = new Worker(URL.createObjectURL(new Blob([$workerSource], {type:'text/javascript'})));
+  let worker = null;
+  let workerUrl = '';
+  let watchdog = null;
+  let workerStarted = false;
   let hasOutput = false;
   const reveal = () => { progress.classList.add('hidden'); };
   const append = (text, css) => { hasOutput=true; reveal(); const line=document.createElement('span'); line.className=css||''; line.textContent=text+'\n'; output.appendChild(line); };
-  worker.onmessage = ({data: message}) => {
-    if (message.kind === 'status') status.textContent = message.value;
-    else if (message.kind === 'html') { hasOutput=true; reveal(); output.style.display='none'; htmlOutput.style.display='block'; htmlOutput.srcdoc=message.value; }
-    else if (message.kind === 'done') { reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行完成，没有输出内容。'; output.className='empty'; } }
-    else if (message.kind === 'error') { reveal(); stop.classList.add('hidden'); append(message.value,'error'); }
-    else append(message.value, message.kind === 'stderr' ? 'stderr' : '');
+  const clearWatchdog = () => { if (watchdog !== null) { clearTimeout(watchdog); watchdog=null; } };
+  const releaseWorkerUrl = () => { if (workerUrl) { URL.revokeObjectURL(workerUrl); workerUrl=''; } };
+  const cleanup = (terminate=true) => { clearWatchdog(); releaseWorkerUrl(); if (terminate && worker) worker.terminate(); };
+  const fail = message => { cleanup(); reveal(); stop.classList.add('hidden'); append(message || '无法启动 Python 运行环境。','error'); };
+  const armWatchdog = label => {
+    clearWatchdog();
+    const running = String(label || '').includes('正在运行');
+    const waitMs = running ? 600000 : 180000;
+    watchdog = setTimeout(() => fail(
+      'Python 运行环境长时间没有响应（停在：' + (label || '启动阶段') + '）。\n' +
+      '请检查网络是否允许加载 Python 运行组件，或稍后刷新重试。'
+    ), waitMs);
   };
-  worker.onerror = event => { reveal(); stop.classList.add('hidden'); append(event.message || '无法启动 Python 运行时，请检查网络后重试。','error'); };
-  stop.onclick = () => { worker.terminate(); reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行已终止。'; output.className='empty'; } };
-  worker.postMessage(data);
+  const handleMessage = ({data: message}) => {
+    if (!workerStarted) { workerStarted=true; releaseWorkerUrl(); }
+    if (message.kind === 'status') { status.textContent = message.value; armWatchdog(message.value); }
+    else if (message.kind === 'html') { hasOutput=true; reveal(); output.style.display='none'; htmlOutput.style.display='block'; htmlOutput.srcdoc=message.value; }
+    else if (message.kind === 'done') { cleanup(); reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行完成，没有输出内容。'; output.className='empty'; } }
+    else if (message.kind === 'error') fail(message.value);
+    else { armWatchdog(status.textContent); append(message.value, message.kind === 'stderr' ? 'stderr' : ''); }
+  };
+  const handleError = event => { if (event.preventDefault) event.preventDefault(); fail(event.message || '无法启动 Python 运行环境，请检查网络后重试。'); };
+  const handleMessageError = () => fail('Python 运行环境返回了无法解析的数据，请刷新重试。');
+  stop.onclick = () => { cleanup(); reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行已终止。'; output.className='empty'; } };
+  try {
+    status.textContent = '正在启动 Python 运行环境…';
+    workerUrl = URL.createObjectURL(new Blob([$workerSource], {type:'text/javascript'}));
+    worker = new Worker(workerUrl, {type:'module', name:'claudechat-python'});
+    worker.onmessage = handleMessage;
+    worker.onerror = handleError;
+    worker.onmessageerror = handleMessageError;
+    armWatchdog(status.textContent);
+    worker.postMessage(data);
+  } catch (error) {
+    fail(error && error.message ? error.message : String(error));
+  }
 })();
 </script></body></html>''',
     );

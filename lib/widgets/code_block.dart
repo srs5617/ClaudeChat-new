@@ -10,11 +10,13 @@ class ClaudeCodeBlockBuilder extends MarkdownElementBuilder {
     this.foldLines = 5,
     this.onRun,
     this.margin = const EdgeInsets.symmetric(vertical: 10),
+    this.fontFamily = 'monospace',
   });
 
   final int foldLines;
   final RunCode? onRun;
   final EdgeInsetsGeometry margin;
+  final String fontFamily;
 
   @override
   bool isBlockElement() => true;
@@ -41,6 +43,7 @@ class ClaudeCodeBlockBuilder extends MarkdownElementBuilder {
       foldLines: foldLines,
       onRun: onRun,
       margin: margin,
+      fontFamily: fontFamily,
     );
   }
 }
@@ -52,6 +55,7 @@ class _FoldableCodeBlock extends StatefulWidget {
     required this.foldLines,
     required this.onRun,
     required this.margin,
+    required this.fontFamily,
   });
 
   final String code;
@@ -59,6 +63,7 @@ class _FoldableCodeBlock extends StatefulWidget {
   final int foldLines;
   final RunCode? onRun;
   final EdgeInsetsGeometry margin;
+  final String fontFamily;
 
   @override
   State<_FoldableCodeBlock> createState() => _FoldableCodeBlockState();
@@ -96,7 +101,7 @@ class _FoldableCodeBlockState extends State<_FoldableCodeBlock> {
         widget.code,
         style: TextStyle(
           color: text,
-          fontFamily: 'monospace',
+          fontFamily: widget.fontFamily,
           fontSize: 11,
           height: 1.45,
         ),

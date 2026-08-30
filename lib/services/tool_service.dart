@@ -1321,17 +1321,23 @@ class ToolService {
   }
 
   Future<Map<String, Object?>> _setGreeting(String value) async {
-    if (value.trim().isEmpty) throw const FormatException('请输入欢迎语');
-    await settings.set('greeting', value.trim());
-    return <String, Object?>{'greeting': value.trim()};
+    final greeting = _normalizeDisplayLineBreaks(value).trim();
+    if (greeting.isEmpty) throw const FormatException('请输入欢迎语');
+    await settings.set('greeting', greeting);
+    return <String, Object?>{'greeting': greeting};
   }
 
   Future<Map<String, Object?>> _setSplash(String value) async {
-    final phrases = value.trim();
+    final phrases = _normalizeDisplayLineBreaks(value).trim();
     if (phrases.isEmpty) throw const FormatException('请输入开屏语');
     await settings.set('splashPhrases', phrases);
     return <String, Object?>{'phrases': phrases};
   }
+
+  String _normalizeDisplayLineBreaks(String value) => value
+      .replaceAll(r'\r\n', '\n')
+      .replaceAll(r'\n', '\n')
+      .replaceAll('/n', '\n');
 
   Future<Map<String, Object?>> _calendar(Map<String, Object?> args) async {
     final start = _futureDate(args['start'], '开始时间');

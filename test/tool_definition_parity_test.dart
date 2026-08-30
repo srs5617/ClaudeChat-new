@@ -89,10 +89,12 @@ void main() {
   test('welcome and splash tools persist the values used by the UI', () {
     final source = File('lib/services/tool_service.dart').readAsStringSync();
 
-    expect(source, contains("await settings.set('greeting', value.trim())"));
+    expect(source, contains("final greeting = _normalizeDisplayLineBreaks"));
+    expect(source, contains("await settings.set('greeting', greeting)"));
     expect(source, contains("await settings.set('splashPhrases', phrases)"));
-    expect(source, contains("{'greeting': value.trim()}"));
+    expect(source, contains("{'greeting': greeting}"));
     expect(source, contains("{'phrases': phrases}"));
+    expect(source, contains(".replaceAll(r'\\n', '\\n')"));
   });
 
   test('workspace tools do not retain the removed write-approval prompt', () {

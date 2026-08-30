@@ -1097,6 +1097,52 @@ void main() {
     expect(result.text, '持续传输');
   });
 
+  test('stream idle timeout stays alive while a file tool is streaming', () async {
+    final diagnostics = <Map<String, Object?>>[];
+    final progress = <ChatCompletionPart?>[];
+    final api = ApiClient(
+      SecureVault(),
+      client: _FileToolPauseClient(),
+      responseIdleTimeout: const Duration(milliseconds: 25),
+      toolProgressMinDuration: Duration.zero,
+    );
+
+    final result = await api.chatWithTools(
+      profile: _profile,
+      model: 'test-model',
+      messages: <ChatMessage>[_message],
+      systemPrompt: '',
+      tools: const <Map<String, Object?>>[],
+      executeTool: (_, name, arguments) async => jsonEncode(
+        <String, Object?>{
+          'ok': true,
+          'tool': name,
+          'verified': true,
+          'name': arguments['name'],
+        },
+      ),
+      onToolProgress: progress.add,
+      onDiagnostic: diagnostics.add,
+    );
+
+    expect(result.text, '文件已保存');
+    expect(
+      progress.whereType<ChatCompletionPart>().any(
+        (part) =>
+            part.metadata['name'] == 'create_workspace_file' &&
+            part.metadata['status'] == 'preparing',
+      ),
+      isTrue,
+    );
+    expect(
+      diagnostics.any(
+        (event) =>
+            event['event'] == 'response_idle_extended_for_file_tool',
+      ),
+      isTrue,
+    );
+  });
+
   test(
     'retries a truncated streamed tool call without executing partial JSON',
     () async {
@@ -1256,6 +1302,76 @@ class _TimedStreamClient extends http.BaseClient {
     yield utf8.encode('data: {"choices":[{"delta":{"content":"传输"}}]}\n\n');
     await Future<void>.delayed(const Duration(milliseconds: 30));
     yield utf8.encode('data: [DONE]\n\n');
+  }
+}
+
+class _FileToolPauseClient extends http.BaseClient {
+  var _requestCount = 0;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async {
+    _requestCount++;
+    if (_requestCount == 1) {
+      return http.StreamedResponse(_toolChunks(), 200);
+    }
+    return http.StreamedResponse(
+      Stream<List<int>>.value(
+        utf8.encode(
+          '${_sse(<String, Object?>{
+            'choices': <Object?>[
+              <String, Object?>{
+                'delta': <String, Object?>{'content': '文件已保存'},
+                'finish_reason': 'stop',
+              },
+            ],
+          })}data: [DONE]\n\n',
+        ),
+      ),
+      200,
+    );
+  }
+
+  Stream<List<int>> _toolChunks() async* {
+    yield utf8.encode(
+      _sse(<String, Object?>{
+        'choices': <Object?>[
+          <String, Object?>{
+            'delta': <String, Object?>{
+              'tool_calls': <Object?>[
+                <String, Object?>{
+                  'index': 0,
+                  'id': 'call-file-pause',
+                  'function': <String, Object?>{
+                    'name': 'create_workspace_file',
+                    'arguments': r'{"name":"large.py","content":"',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 80));
+    yield utf8.encode(
+      '${_sse(<String, Object?>{
+        'choices': <Object?>[
+          <String, Object?>{
+            'delta': <String, Object?>{
+              'tool_calls': <Object?>[
+                <String, Object?>{
+                  'index': 0,
+                  'function': <String, Object?>{
+                    'arguments': r'print(42)"}',
+                  },
+                },
+              ],
+            },
+            'finish_reason': 'tool_calls',
+          },
+        ],
+      })}data: [DONE]\n\n',
+    );
   }
 }
 

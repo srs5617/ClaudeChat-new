@@ -13,7 +13,7 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
-    final controller = AppController.visualAudit(scenario: 'chat-rich');
+    final controller = AppController.visualAudit(scenario: 'chat-markdown');
     addTearDown(controller.dispose);
     controller.settings
       ..['customFontFamily'] = 'UploadedFont'
@@ -30,7 +30,8 @@ void main() {
     );
     final userText = tester.widget<SelectableText>(
       find.byWidgetPredicate(
-        (widget) => widget is SelectableText && widget.data == '莫西莫西',
+        (widget) =>
+            widget is SelectableText && widget.data?.startsWith('# 标题') == true,
       ),
     );
     final assistant = tester.widget<MarkdownBody>(
@@ -43,6 +44,18 @@ void main() {
     expect(composer.style?.fontFamily, 'UploadedFont');
     expect(userText.style?.fontFamily, 'UploadedFont');
     expect(assistant.styleSheet?.p?.fontFamily, 'UploadedFont');
+    expect(assistant.styleSheet?.code?.fontFamily, 'UploadedFont');
+
+    final codeBlock = tester.widget<SelectableText>(
+      find
+          .byWidgetPredicate(
+            (widget) =>
+                widget is SelectableText &&
+                widget.data?.startsWith('1\n2\n3') == true,
+          )
+          .first,
+    );
+    expect(codeBlock.style?.fontFamily, 'UploadedFont');
   });
 
   testWidgets('legacy chat typography uses exact families and compact sizes', (
@@ -84,6 +97,7 @@ void main() {
     );
     expect(assistant.styleSheet?.p?.fontFamily, 'Lora');
     expect(assistant.styleSheet?.p?.fontSize, closeTo(130 / 9, .000001));
+    expect(assistant.styleSheet?.code?.fontFamily, 'JetBrainsMono');
     await tester.pump(const Duration(milliseconds: 250));
   });
 }

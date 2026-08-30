@@ -261,6 +261,59 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  test('workspace task persistence and presentation are independent', () {
+    final controller = AppController.visualAudit(
+      initialSection: AppSection.workspaces,
+      scenario: 'content-rich',
+    );
+    addTearDown(controller.dispose);
+    final original = controller.workspaces.single;
+
+    WorkspaceRecord configure({
+      required bool persistent,
+      required String style,
+    }) {
+      final record = WorkspaceRecord(
+        id: original.id,
+        name: original.name,
+        updatedAt: original.updatedAt,
+        description: original.description,
+        projectType: original.projectType,
+        settings: <String, Object?>{
+          'taskPersistent': persistent,
+          'taskDisplayStyle': style,
+        },
+      );
+      controller
+        ..workspaces = <WorkspaceRecord>[record]
+        ..activeWorkspace = record;
+      return record;
+    }
+
+    configure(persistent: false, style: 'top');
+    expect(controller.workspaceTaskVisible, isFalse);
+    expect(controller.workspaceTaskQueue, isEmpty);
+
+    controller.workspaceBusy = true;
+    expect(controller.workspaceTaskVisible, isTrue);
+    expect(controller.workspaceTaskQueue, isEmpty);
+
+    configure(persistent: false, style: 'ball');
+    expect(controller.workspaceTaskVisible, isTrue);
+    expect(controller.workspaceTaskQueue, hasLength(1));
+    controller.workspaceBusy = false;
+    expect(controller.workspaceTaskVisible, isFalse);
+    expect(controller.workspaceTaskQueue, isEmpty);
+
+    configure(persistent: true, style: 'ball');
+    expect(controller.workspaceTaskVisible, isTrue);
+    expect(controller.workspaceTaskQueue, hasLength(1));
+
+    configure(persistent: true, style: 'top');
+    expect(controller.workspaceTaskVisible, isTrue);
+    expect(controller.workspaceTaskQueue, isEmpty);
+  });
+
   testWidgets('workspace task ball can hint from an ordinary chat', (
     tester,
   ) async {

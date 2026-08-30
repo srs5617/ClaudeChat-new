@@ -573,7 +573,7 @@ private final class HtmlPreviewViewController: UIViewController, WKNavigationDel
 
   private func loadDocument() {
     title = fallbackTitle
-    let policy = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; connect-src http: https: data: blob:; img-src http: https: data: blob:; media-src http: https: data: blob:\">"
+    let policy = "<meta http-equiv=\"Content-Security-Policy\" content=\"default-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; script-src http: https: data: blob: 'unsafe-inline' 'unsafe-eval'; worker-src blob: data:; connect-src http: https: data: blob:; img-src http: https: data: blob:; media-src http: https: data: blob:\">"
     let document: String
     if source.range(of: "<head", options: .caseInsensitive) != nil {
       document = source.replacingOccurrences(
