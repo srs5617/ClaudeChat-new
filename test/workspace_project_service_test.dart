@@ -114,6 +114,10 @@ void main() {
     expect(pythonDocument.html, contains('pyodide.mjs'));
     expect(pythonDocument.html, contains("type:'module'"));
     expect(pythonDocument.html, contains('长时间没有响应'));
+    expect(pythonDocument.html, contains("line.textContent=text+'\\n'"));
+    expect(pythonDocument.html, isNot(contains("line.textContent=text+'\n'")));
+    expect(pythonDocument.html, contains('class="hidden"'));
+    expect(pythonDocument.html, contains("stop.classList.remove('hidden')"));
     expect(pythonDocument.html, isNot(contains('importScripts')));
   });
 

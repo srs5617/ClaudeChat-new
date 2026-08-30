@@ -26,6 +26,7 @@ import 'services/tool_service.dart';
 import 'services/tool_preferences.dart';
 import 'services/usage_formatter.dart';
 import 'services/voice_service.dart';
+import 'services/workspace_export_service.dart';
 import 'services/workspace_project_service.dart';
 
 enum AppSection { chat, memories, diary, files, voices, workspaces, settings }
@@ -1188,8 +1189,7 @@ class AppController extends ChangeNotifier {
       activeWorkspace?.settings['allowMultipleWorkspaceRuns'] != false;
 
   String get workspaceTaskDisplayStyle =>
-      '${activeWorkspace?.settings['taskDisplayStyle'] ?? 'top'}' ==
-          'ball'
+      '${activeWorkspace?.settings['taskDisplayStyle'] ?? 'top'}' == 'ball'
       ? 'ball'
       : 'top';
 
@@ -3506,6 +3506,43 @@ class AppController extends ChangeNotifier {
       run.timedOut = true;
       if (run.abort?.isCompleted == false) run.abort?.complete();
     });
+  }
+
+  Future<String?> exportActiveWorkspacePackage() async {
+    final workspace = activeWorkspace;
+    if (workspace == null) {
+      throw StateError('请先打开一个工作区');
+    }
+    final files = await content.workspaceFiles(workspace.id);
+    final sources = <String, String>{
+      for (final file in files)
+        file.name: await content.readWorkspaceFile(file),
+    };
+    final bytes = WorkspaceExportService.buildZip(sources);
+    final safeName = workspace.name.trim().replaceAll(
+      RegExp(r'[\\/:*?"<>|]'),
+      '_',
+    );
+    final fileName = '${safeName.isEmpty ? 'workspace' : safeName}.zip';
+    final destination = await getSaveLocation(
+      suggestedName: fileName,
+      acceptedTypeGroups: const <XTypeGroup>[
+        XTypeGroup(
+          label: 'ZIP 文件包',
+          extensions: <String>['zip'],
+          mimeTypes: <String>['application/zip'],
+          uniformTypeIdentifiers: <String>['public.zip-archive'],
+        ),
+      ],
+    );
+    if (destination == null) return null;
+    final package = XFile.fromData(
+      bytes,
+      mimeType: 'application/zip',
+      name: fileName,
+    );
+    await package.saveTo(destination.path);
+    return destination.path;
   }
 
   Future<void> _recordWorkspaceAssistantFailure(

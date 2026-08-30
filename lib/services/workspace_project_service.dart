@@ -373,8 +373,18 @@ html,body{margin:0;min-height:100%;background:#fff;color:#171717}
 <pre id="plain-output" aria-live="polite"></pre>
 <iframe id="html-output" title="$title" sandbox="allow-scripts allow-forms allow-modals allow-downloads"></iframe>
 <div id="progress" role="status"><span class="spinner"></span><span id="status">正在准备运行…</span></div>
-<button id="stop" type="button" aria-label="终止运行" title="终止运行">终止运行</button>
+<button id="stop" class="hidden" type="button" aria-label="终止运行" title="终止运行">终止运行</button>
 <script id="claudechat-python-project" type="application/json">$payload</script>
+<script>
+window.addEventListener('error', function(event) {
+  const progress = document.getElementById('progress');
+  const status = document.getElementById('status');
+  const stop = document.getElementById('stop');
+  if (progress) progress.classList.remove('hidden');
+  if (stop) stop.classList.add('hidden');
+  if (status) status.textContent = 'Python 运行环境启动失败：' + (event.message || '脚本解析异常');
+});
+</script>
 <script>
 (() => {
   const data = JSON.parse(document.getElementById('claudechat-python-project').textContent);
@@ -389,7 +399,7 @@ html,body{margin:0;min-height:100%;background:#fff;color:#171717}
   let workerStarted = false;
   let hasOutput = false;
   const reveal = () => { progress.classList.add('hidden'); };
-  const append = (text, css) => { hasOutput=true; reveal(); const line=document.createElement('span'); line.className=css||''; line.textContent=text+'\n'; output.appendChild(line); };
+  const append = (text, css) => { hasOutput=true; reveal(); const line=document.createElement('span'); line.className=css||''; line.textContent=text+'\\n'; output.appendChild(line); };
   const clearWatchdog = () => { if (watchdog !== null) { clearTimeout(watchdog); watchdog=null; } };
   const releaseWorkerUrl = () => { if (workerUrl) { URL.revokeObjectURL(workerUrl); workerUrl=''; } };
   const cleanup = (terminate=true) => { clearWatchdog(); releaseWorkerUrl(); if (terminate && worker) worker.terminate(); };
@@ -399,7 +409,7 @@ html,body{margin:0;min-height:100%;background:#fff;color:#171717}
     const running = String(label || '').includes('正在运行');
     const waitMs = running ? 600000 : 180000;
     watchdog = setTimeout(() => fail(
-      'Python 运行环境长时间没有响应（停在：' + (label || '启动阶段') + '）。\n' +
+      'Python 运行环境长时间没有响应（停在：' + (label || '启动阶段') + '）。\\n' +
       '请检查网络是否允许加载 Python 运行组件，或稍后刷新重试。'
     ), waitMs);
   };
@@ -413,11 +423,19 @@ html,body{margin:0;min-height:100%;background:#fff;color:#171717}
   };
   const handleError = event => { if (event.preventDefault) event.preventDefault(); fail(event.message || '无法启动 Python 运行环境，请检查网络后重试。'); };
   const handleMessageError = () => fail('Python 运行环境返回了无法解析的数据，请刷新重试。');
-  stop.onclick = () => { cleanup(); reveal(); stop.classList.add('hidden'); if (!hasOutput) { output.textContent='运行已终止。'; output.className='empty'; } };
+  stop.onclick = () => {
+    cleanup();
+    reveal();
+    stop.classList.add('hidden');
+    htmlOutput.style.display='none';
+    output.style.display='block';
+    append('运行已终止。','empty');
+  };
   try {
     status.textContent = '正在启动 Python 运行环境…';
     workerUrl = URL.createObjectURL(new Blob([$workerSource], {type:'text/javascript'}));
     worker = new Worker(workerUrl, {type:'module', name:'claudechat-python'});
+    stop.classList.remove('hidden');
     worker.onmessage = handleMessage;
     worker.onerror = handleError;
     worker.onmessageerror = handleMessageError;

@@ -8945,11 +8945,49 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
               ),
             ),
             const Spacer(),
+            OutlinedButton.icon(
+              onPressed: controller.workspaceBusy
+                  ? null
+                  : () => _exportWorkspace(context),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                shape: const StadiumBorder(),
+                side: BorderSide(color: dark ? _darkLine : _lightLine),
+                foregroundColor: muted,
+                textStyle: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              icon: const Icon(Icons.ios_share_rounded, size: 14),
+              label: const Text('导出'),
+            ),
+            const SizedBox(width: 6),
             FilledButton.icon(
               onPressed: controller.workspaceBusy
                   ? null
                   : () => _runWorkspace(context),
-              icon: const Icon(Icons.play_arrow_rounded, size: 18),
+              style: FilledButton.styleFrom(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                minimumSize: Size.zero,
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                visualDensity: VisualDensity.compact,
+                shape: const StadiumBorder(),
+                textStyle: const TextStyle(
+                  fontSize: 11.5,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              icon: const Icon(Icons.play_arrow_rounded, size: 14),
               label: const Text('运行'),
             ),
           ],
@@ -10271,6 +10309,21 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
         fallbackTitle: workspace.name,
       ),
     );
+  }
+
+  Future<void> _exportWorkspace(BuildContext context) async {
+    try {
+      final path = await controller.exportActiveWorkspacePackage();
+      if (!context.mounted || path == null) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('工作区文件包已导出')));
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导出失败：$error')));
+    }
   }
 
   String _workspaceCapability(String type) => switch (type) {
