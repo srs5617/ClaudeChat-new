@@ -109,6 +109,9 @@ void main() {
       initialSection: AppSection.workspaces,
       scenario: 'content-rich',
     );
+    controller.settings
+      ..['fontFamily'] = 'custom'
+      ..['customFontFamily'] = 'WorkspaceAuditCustom';
     final workspace = controller.workspaces.single;
     final timestamp = DateTime.utc(2026, 8, 17, 13, 30);
     controller
@@ -162,6 +165,23 @@ void main() {
     await tester.pump();
     expect(find.text('README.md'), findsOneWidget);
     expect(find.text('运行'), findsOneWidget);
+    expect(find.text('导出'), findsOneWidget);
+    final exportButton = tester.widget<OutlinedButton>(
+      find.widgetWithText(OutlinedButton, '导出'),
+    );
+    final runButton = tester.widget<FilledButton>(
+      find.widgetWithText(FilledButton, '运行'),
+    );
+    expect(
+      exportButton.style?.textStyle?.resolve(const <WidgetState>{})?.fontFamily,
+      'WorkspaceAuditCustom',
+    );
+    expect(
+      runButton.style?.textStyle?.resolve(const <WidgetState>{})?.fontFamily,
+      'WorkspaceAuditCustom',
+    );
+    expect(find.byIcon(Icons.ios_share_rounded), findsNothing);
+    expect(find.byIcon(Icons.play_arrow_rounded), findsNothing);
     expect(find.text('markdown · 27 B'), findsOneWidget);
     expect(tester.takeException(), isNull);
 

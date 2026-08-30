@@ -8945,50 +8945,57 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
               ),
             ),
             const Spacer(),
-            OutlinedButton.icon(
-              onPressed: controller.workspaceBusy
-                  ? null
-                  : () => _exportWorkspace(context),
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
+            SizedBox(
+              width: 58,
+              height: 32,
+              child: OutlinedButton(
+                onPressed: controller.workspaceBusy
+                    ? null
+                    : () => _exportWorkspace(context),
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(58, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  side: BorderSide(color: dark ? _darkLine : _lightLine),
+                  foregroundColor: muted,
+                  textStyle: TextStyle(
+                    fontFamily: _selectedFontFamily(controller.settings),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-                shape: const StadiumBorder(),
-                side: BorderSide(color: dark ? _darkLine : _lightLine),
-                foregroundColor: muted,
-                textStyle: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
+                child: const Text('导出'),
               ),
-              icon: const Icon(Icons.ios_share_rounded, size: 14),
-              label: const Text('导出'),
             ),
             const SizedBox(width: 6),
-            FilledButton.icon(
-              onPressed: controller.workspaceBusy
-                  ? null
-                  : () => _runWorkspace(context),
-              style: FilledButton.styleFrom(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
+            SizedBox(
+              width: 58,
+              height: 32,
+              child: FilledButton(
+                onPressed: controller.workspaceBusy
+                    ? null
+                    : () => _runWorkspace(context),
+                style: FilledButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(58, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  textStyle: TextStyle(
+                    fontFamily: _selectedFontFamily(controller.settings),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                minimumSize: Size.zero,
-                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                visualDensity: VisualDensity.compact,
-                shape: const StadiumBorder(),
-                textStyle: const TextStyle(
-                  fontSize: 11.5,
-                  fontWeight: FontWeight.w700,
-                ),
+                child: const Text('运行'),
               ),
-              icon: const Icon(Icons.play_arrow_rounded, size: 14),
-              label: const Text('运行'),
             ),
           ],
         ),
