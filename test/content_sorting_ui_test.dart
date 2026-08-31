@@ -128,4 +128,25 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 250));
   });
+
+  testWidgets('a single memory card keeps its natural content height', (
+    tester,
+  ) async {
+    await setViewport(tester);
+    final controller = AppController.visualAudit(scenario: 'content-rich')
+      ..section = AppSection.memories;
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    await tester.pump();
+
+    final card = find.byKey(
+      const ValueKey<String>('memory-card-visual-audit-memory'),
+    );
+    expect(card, findsOneWidget);
+    expect(tester.getSize(card).height, lessThan(300));
+    expect(tester.takeException(), isNull);
+  });
 }

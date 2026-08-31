@@ -4082,6 +4082,7 @@ class AppController extends ChangeNotifier {
     final conversation = activeConversation;
     var systemPrompt = _chatSystemPrompt();
     var systemPromptWithoutTools = _chatSystemPrompt(includeTools: false);
+    await _recordInjectedCriticalMemoryAccess();
     final approvalContext = _consumeResolvedApprovals();
     List<ChatMessage> appendApproval(List<ChatMessage> source) =>
         approvalContext.isEmpty
@@ -4182,6 +4183,19 @@ class AppController extends ChangeNotifier {
       summarizedMessages: summarizedCount,
       droppedMessages: trim.dropped,
     );
+  }
+
+  Future<void> _recordInjectedCriticalMemoryAccess() async {
+    if (privateMode) return;
+    final ids = memories
+        .where((item) => item.level == 'critical' && item.deletedAt == null)
+        .take(24)
+        .map((item) => item.id)
+        .toList(growable: false);
+    if (ids.isEmpty) return;
+    await content.recordMemoryAccesses(ids);
+    memories = await content.memories(includeDeleted: true);
+    notifyListeners();
   }
 
   int _historicalToolExtraTokens(ChatMessage message) {

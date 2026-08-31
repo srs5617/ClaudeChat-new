@@ -1775,7 +1775,9 @@ class _ConversationRow extends StatelessWidget {
             onPressed: onToggleStar,
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints.tightFor(width: 26, height: 26),
-            icon: const _LegacyIcon(_LegacyIconKind.star, size: 18),
+            icon: starred
+                ? const Icon(Icons.star_rounded, size: 18, color: _accent)
+                : const _LegacyIcon(_LegacyIconKind.star, size: 18),
             tooltip: starred ? '取消置顶' : '置顶',
           ),
           IconButton(
@@ -2448,6 +2450,7 @@ enum _LegacyIconKind {
   copy,
   refresh,
   send,
+  play,
   stop,
   warning,
   thumbsUp,
@@ -2606,6 +2609,17 @@ class _LegacyIconPainter extends CustomPainter {
             paint,
           )
           ..drawLine(const Offset(22, 2), const Offset(11, 13), paint);
+      case _LegacyIconKind.play:
+        canvas.drawPath(
+          Path()
+            ..moveTo(8, 5)
+            ..lineTo(19, 12)
+            ..lineTo(8, 19)
+            ..close(),
+          Paint()
+            ..color = color
+            ..style = PaintingStyle.fill,
+        );
       case _LegacyIconKind.stop:
         canvas.drawRRect(
           RRect.fromRectAndRadius(
@@ -6119,35 +6133,23 @@ class _MemoriesPageState extends State<_MemoriesPage> {
                     title: '还没有匹配的记忆。',
                     message: '换一个关键词，或者等 AI 创建一些记忆。',
                   )
-                : LayoutBuilder(
-                    builder: (context, constraints) => ListView.separated(
-                      padding: EdgeInsets.zero,
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, _) => const SizedBox(height: 10),
-                      itemBuilder: (context, index) {
-                        final item = filtered[index];
-                        return ConstrainedBox(
-                          constraints: BoxConstraints(
-                            minHeight: filtered.length == 1
-                                ? constraints.maxHeight
-                                : 0,
-                          ),
-                          child: _LegacyMemoryCard(
-                            item: item,
-                            highlighted: item.id == highlightedEntryId,
-                            onEdit: () => startEditor(item),
-                            onDelete: () => _deleteMemory(item),
-                            onRestore: () async {
-                              await controller.restoreEntity(
-                                'memories',
-                                item.id,
-                              );
-                              if (mounted) _snack(this.context, '记忆已恢复');
-                            },
-                          ),
-                        );
-                      },
-                    ),
+                : ListView.separated(
+                    padding: EdgeInsets.zero,
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 10),
+                    itemBuilder: (context, index) {
+                      final item = filtered[index];
+                      return _LegacyMemoryCard(
+                        item: item,
+                        highlighted: item.id == highlightedEntryId,
+                        onEdit: () => startEditor(item),
+                        onDelete: () => _deleteMemory(item),
+                        onRestore: () async {
+                          await controller.restoreEntity('memories', item.id);
+                          if (mounted) _snack(this.context, '记忆已恢复');
+                        },
+                      );
+                    },
                   ),
           ),
         ],
@@ -6304,6 +6306,7 @@ class _LegacyMemoryCard extends StatelessWidget {
           child: Opacity(
             opacity: deleted ? .78 : 1,
             child: Container(
+              key: ValueKey<String>('memory-card-${item.id}'),
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(12, 14, 12, 12),
               decoration: BoxDecoration(
@@ -7666,7 +7669,12 @@ class _FilesPageState extends State<_FilesPage> {
     );
   }
 
-  Future<void> _previewFile(UserFileRecord item, String content) async {
+  Future<void> _previewFile(
+    UserFileRecord item,
+    String content, {
+    String? runtimeScope,
+    String? fallbackTitle,
+  }) async {
     if (utf8.encode(content).length > AttachmentService.warningThresholdBytes) {
       final approved = await showDialog<bool>(
         context: context,
@@ -7689,8 +7697,8 @@ class _FilesPageState extends State<_FilesPage> {
     }
     await controller.platform.previewHtml(
       content,
-      runtimeScope: 'file-${item.id}',
-      fallbackTitle: item.name,
+      runtimeScope: runtimeScope ?? 'file-${item.id}',
+      fallbackTitle: fallbackTitle ?? item.name,
     );
   }
 
@@ -7740,6 +7748,12 @@ class _FilesPageState extends State<_FilesPage> {
                       content: content,
                     ),
                   ),
+                  if (!deleted && _canPreview(file.name, file.type))
+                    _LegacyFileAction(
+                      icon: _LegacyIconKind.play,
+                      tooltip: '运行',
+                      onPressed: () => _previewFile(file, content),
+                    ),
                   _LegacyFileAction(
                     icon: _LegacyIconKind.clock,
                     tooltip: '历史版本',
@@ -7877,6 +7891,12 @@ class _FilesPageState extends State<_FilesPage> {
         file: file,
         versions: versions,
         readContent: controller.content.readFileVersion,
+        onRunVersion: (version, content) => _previewFile(
+          file,
+          content,
+          runtimeScope: 'file-${file.id}-version-${version.id}',
+          fallbackTitle: '${file.name} · 历史版本',
+        ),
         onClose: () => Navigator.pop(dialogContext),
       ),
     );
@@ -7915,6 +7935,7 @@ class _LegacyFileHistoryPage extends StatefulWidget {
     required this.file,
     required this.versions,
     required this.readContent,
+    required this.onRunVersion,
     required this.onClose,
   });
 
@@ -7922,6 +7943,8 @@ class _LegacyFileHistoryPage extends StatefulWidget {
   final UserFileRecord file;
   final List<UserFileVersionRecord> versions;
   final Future<String> Function(UserFileVersionRecord version) readContent;
+  final Future<void> Function(UserFileVersionRecord version, String content)
+  onRunVersion;
   final VoidCallback onClose;
 
   @override
@@ -7976,6 +7999,15 @@ class _LegacyFileHistoryPageState extends State<_LegacyFileHistoryPage> {
                           );
                         },
                       ),
+                      if (_canPreview(widget.file.name, widget.file.type))
+                        _LegacyFileAction(
+                          icon: _LegacyIconKind.play,
+                          tooltip: '运行',
+                          onPressed: () async {
+                            final body = await _content(version);
+                            await widget.onRunVersion(version, body);
+                          },
+                        ),
                     ],
             ),
             if (version == null)
@@ -14660,11 +14692,15 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
       options.insert(1, (encodedModel, apiName));
     }
     final hasModel = options.any((item) => item.$1 == encodedModel);
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final surface = dark ? _darkSurface : _lightSurface;
+    final soft = dark ? _darkBackground : _lightSurfaceSoft;
+    final line = dark ? _darkLine : _lightLine;
     return Container(
       clipBehavior: Clip.antiAlias,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE5E0DB)),
+        color: surface,
+        border: Border.all(color: line),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Column(
@@ -14673,9 +14709,9 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
           Container(
             height: 48.3333,
             padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF4F2EF),
-              border: Border(bottom: BorderSide(color: Color(0xFFE5E0DB))),
+            decoration: BoxDecoration(
+              color: soft,
+              border: Border(bottom: BorderSide(color: line)),
             ),
             child: Row(
               children: <Widget>[
@@ -14711,12 +14747,12 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
                   const SizedBox(width: 4),
                 ],
                 SizedBox(
-                  width: 60,
-                  height: 28,
+                  height: 30,
                   child: OutlinedButton(
                     onPressed: () => _save('stream', slot['stream'] == false),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(horizontal: 10),
+                      minimumSize: const Size(0, 30),
                       textStyle: const TextStyle(
                         fontSize: 9.9,
                         fontWeight: FontWeight.w700,
@@ -14738,37 +14774,36 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
           Padding(
             padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
             child: SizedBox(
-              height: 22.6667,
+              height: 40,
               child: Row(
                 children: <Widget>[
                   Expanded(
                     flex: 9,
-                    child: DecoratedBox(
-                      decoration: const BoxDecoration(
-                        border: Border(
-                          top: BorderSide(color: Color(0xFFDCDCDC), width: 2),
-                          bottom: BorderSide(
-                            color: Color(0xFFDCDCDC),
-                            width: 2,
-                          ),
-                          left: BorderSide(color: Color(0xFF979797)),
-                          right: BorderSide(color: Color(0xFF979797)),
+                    child: TextFormField(
+                      controller: labelController,
+                      style: const TextStyle(fontSize: 12.6, height: 1.2),
+                      decoration: InputDecoration(
+                        hintText: '模型显示名',
+                        filled: true,
+                        fillColor: surface,
+                        constraints: const BoxConstraints.tightFor(height: 40),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: BorderSide(color: line),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: _accent),
                         ),
                       ),
-                      child: TextFormField(
-                        controller: labelController,
-                        style: const TextStyle(fontSize: 12.6, height: 1),
-                        decoration: const InputDecoration(
-                          hintText: '模型显示名',
-                          filled: false,
-                          constraints: BoxConstraints.tightFor(height: 22.6667),
-                          contentPadding: EdgeInsets.fromLTRB(2, 1, 2, 1),
-                          border: InputBorder.none,
-                          enabledBorder: InputBorder.none,
-                          focusedBorder: InputBorder.none,
-                        ),
-                        onChanged: (value) => unawaited(_save('label', value)),
-                      ),
+                      onChanged: (value) => unawaited(_save('label', value)),
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -14778,13 +14813,12 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
                       value: hasModel ? encodedModel : '',
                       hint: '选择真实模型 ID',
                       items: options,
-                      height: 22.6667,
-                      borderRadius: 0,
-                      borderColor: const Color(0xFF767676),
-                      borderWidth: .6667,
-                      horizontalPadding: 2,
+                      height: 40,
+                      borderRadius: 10,
+                      borderColor: line,
+                      borderWidth: 1,
+                      horizontalPadding: 10,
                       fontSize: 12.6,
-                      compact: true,
                       onChanged: (value) {
                         final parts = value.split('::');
                         slot['apiProfileId'] = parts.first;
@@ -14844,82 +14878,51 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
             onChanged: (value) => _save('maxTokens', value),
           ),
           SizedBox(
-            height: 34,
+            height: 46,
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: Row(
                 children: <Widget>[
-                  SizedBox(
-                    width: 78,
-                    child: Stack(
-                      children: <Widget>[
-                        Align(
-                          alignment: Alignment.centerLeft,
-                          child: Text(
-                            '上下文预算(K)',
-                            maxLines: 1,
-                            overflow: TextOverflow.visible,
-                            style: const TextStyle(
-                              fontSize: 9.9,
-                              fontWeight: FontWeight.w600,
-                              color: Color(0xFF77716B),
-                            ),
-                          ),
-                        ),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: Text(
-                            slot['contextTokens'] == null
-                                ? 'none'
-                                : _formatContextBudgetK(
-                                    slot['contextTokens'] as num,
-                                  ),
-                            style: const TextStyle(
-                              fontSize: 10.8,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                  _LegacyModelParameterLabel(
+                    label: '上下文预算(K)',
+                    value: slot['contextTokens'] == null
+                        ? 'none'
+                        : _formatContextBudgetK(slot['contextTokens'] as num),
                   ),
                   const SizedBox(width: 6),
                   Expanded(
                     child: SizedBox(
-                      height: 22.6667,
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          border: Border(
-                            top: BorderSide(color: Color(0xFFDCDCDC), width: 2),
-                            bottom: BorderSide(
-                              color: Color(0xFFDCDCDC),
-                              width: 2,
-                            ),
-                            left: BorderSide(color: Color(0xFF979797)),
-                            right: BorderSide(color: Color(0xFF979797)),
+                      height: 36,
+                      child: TextFormField(
+                        controller: contextController,
+                        keyboardType: TextInputType.number,
+                        style: const TextStyle(fontSize: 12, height: 1.2),
+                        decoration: InputDecoration(
+                          hintText: 'none',
+                          filled: true,
+                          fillColor: surface,
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: BorderSide(color: line),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                            borderSide: const BorderSide(color: _accent),
                           ),
                         ),
-                        child: TextFormField(
-                          controller: contextController,
-                          keyboardType: TextInputType.number,
-                          decoration: const InputDecoration(
-                            hintText: 'none',
-                            filled: false,
-                            constraints: BoxConstraints.tightFor(
-                              height: 22.6667,
-                            ),
-                            contentPadding: EdgeInsets.fromLTRB(2, 1, 2, 1),
-                            border: InputBorder.none,
-                            enabledBorder: InputBorder.none,
-                            focusedBorder: InputBorder.none,
-                          ),
-                          onChanged: (value) => unawaited(
-                            _save(
-                              'contextTokens',
-                              int.tryParse(value) == null
-                                  ? null
-                                  : int.parse(value) * 1000,
-                            ),
+                        onChanged: (value) => unawaited(
+                          _save(
+                            'contextTokens',
+                            int.tryParse(value) == null
+                                ? null
+                                : int.parse(value) * 1000,
                           ),
                         ),
                       ),
@@ -14927,8 +14930,8 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
                   ),
                   const SizedBox(width: 6),
                   SizedBox(
-                    width: 38,
-                    height: 20,
+                    width: 44,
+                    height: 28,
                     child: OutlinedButton(
                       onPressed: () => _save(
                         'contextTokens',
@@ -14938,12 +14941,12 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
                         padding: EdgeInsets.zero,
                         backgroundColor: slot['contextTokens'] == null
                             ? const Color(0xFFD7D0CA)
-                            : Colors.white,
+                            : surface,
                         foregroundColor: slot['contextTokens'] == null
                             ? Colors.white
                             : const Color(0xFF77716B),
                         textStyle: const TextStyle(
-                          fontSize: 8.1,
+                          fontSize: 9,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
@@ -14983,40 +14986,14 @@ class _LegacyModelSlider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SizedBox(
-    height: 34,
+    height: 46,
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: Row(
         children: <Widget>[
-          SizedBox(
-            width: 78,
-            child: Stack(
-              children: <Widget>[
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text(
-                    label,
-                    maxLines: 1,
-                    overflow: TextOverflow.visible,
-                    style: const TextStyle(
-                      fontSize: 9.9,
-                      fontWeight: FontWeight.w600,
-                      color: Color(0xFF77716B),
-                    ),
-                  ),
-                ),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    value == null ? 'none' : _formatModelParameter(value!),
-                    style: const TextStyle(
-                      fontSize: 10.8,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-              ],
-            ),
+          _LegacyModelParameterLabel(
+            label: label,
+            value: value == null ? 'none' : _formatModelParameter(value!),
           ),
           const SizedBox(width: 6),
           Expanded(
@@ -15053,20 +15030,20 @@ class _LegacyModelSlider extends StatelessWidget {
           ),
           const SizedBox(width: 6),
           SizedBox(
-            width: 38,
-            height: 20,
+            width: 44,
+            height: 28,
             child: OutlinedButton(
               onPressed: () => onChanged(value == null ? fallback : null),
               style: OutlinedButton.styleFrom(
                 padding: EdgeInsets.zero,
                 backgroundColor: value == null
                     ? const Color(0xFFD7D0CA)
-                    : Colors.white,
+                    : Theme.of(context).colorScheme.surface,
                 foregroundColor: value == null
                     ? Colors.white
                     : const Color(0xFF77716B),
                 textStyle: const TextStyle(
-                  fontSize: 8.1,
+                  fontSize: 9,
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -15075,6 +15052,46 @@ class _LegacyModelSlider extends StatelessWidget {
           ),
         ],
       ),
+    ),
+  );
+}
+
+class _LegacyModelParameterLabel extends StatelessWidget {
+  const _LegacyModelParameterLabel({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 96,
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text(
+          label,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: 9.9,
+            fontWeight: FontWeight.w600,
+            height: 1.15,
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          value,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            fontSize: 10.8,
+            fontWeight: FontWeight.w700,
+            height: 1.15,
+          ),
+        ),
+      ],
     ),
   );
 }
@@ -15710,7 +15727,6 @@ class _LegacySelect extends StatelessWidget {
     this.borderWidth = 1,
     this.horizontalPadding = 10,
     this.fontSize = 12.6,
-    this.compact = false,
   });
 
   final String value;
@@ -15723,7 +15739,6 @@ class _LegacySelect extends StatelessWidget {
   final double borderWidth;
   final double horizontalPadding;
   final double fontSize;
-  final bool compact;
 
   @override
   Widget build(BuildContext context) {
@@ -15733,7 +15748,7 @@ class _LegacySelect extends StatelessWidget {
     final textColor = dark ? const Color(0xFFE8E6E1) : const Color(0xFF101010);
     final muted = dark ? const Color(0xFF96948B) : _lightMuted;
     return MenuAnchor(
-      alignmentOffset: Offset(0, compact ? 2 : 4),
+      alignmentOffset: const Offset(0, 4),
       style: MenuStyle(
         backgroundColor: WidgetStatePropertyAll<Color>(surface),
         elevation: const WidgetStatePropertyAll<double>(8),
@@ -15745,7 +15760,7 @@ class _LegacySelect extends StatelessWidget {
             side: BorderSide(
               color: dark ? const Color(0xFF4B4A45) : _lightLine,
             ),
-            borderRadius: BorderRadius.circular(compact ? 6 : 10),
+            borderRadius: BorderRadius.circular(10),
           ),
         ),
       ),
@@ -15754,11 +15769,9 @@ class _LegacySelect extends StatelessWidget {
           MenuItemButton(
             onPressed: () => onChanged(item.$1),
             style: ButtonStyle(
-              minimumSize: WidgetStatePropertyAll<Size>(
-                Size(compact ? 190 : 260, compact ? 32 : 38),
-              ),
-              padding: WidgetStatePropertyAll<EdgeInsets>(
-                EdgeInsets.symmetric(horizontal: compact ? 9 : 12),
+              minimumSize: const WidgetStatePropertyAll<Size>(Size(260, 38)),
+              padding: const WidgetStatePropertyAll<EdgeInsets>(
+                EdgeInsets.symmetric(horizontal: 12),
               ),
               foregroundColor: WidgetStatePropertyAll<Color>(textColor),
               backgroundColor: item.$1 == value
@@ -15767,11 +15780,11 @@ class _LegacySelect extends StatelessWidget {
                     )
                   : null,
               textStyle: WidgetStatePropertyAll<TextStyle>(
-                TextStyle(fontSize: compact ? 12 : 13, height: 1.2),
+                const TextStyle(fontSize: 13, height: 1.2),
               ),
             ),
             child: SizedBox(
-              width: compact ? 166 : 236,
+              width: 236,
               child: Text(
                 item.$2,
                 maxLines: 1,
@@ -15811,12 +15824,8 @@ class _LegacySelect extends StatelessWidget {
                     ),
                   ),
                 ),
-                SizedBox(width: compact ? 2 : 6),
-                Icon(
-                  Icons.arrow_drop_down_rounded,
-                  size: compact ? 14 : 18,
-                  color: muted,
-                ),
+                const SizedBox(width: 6),
+                Icon(Icons.arrow_drop_down_rounded, size: 18, color: muted),
               ],
             ),
           ),

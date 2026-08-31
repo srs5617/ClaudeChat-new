@@ -422,6 +422,23 @@ class ContentRepository {
     return rows.map(MemoryEntry.fromMap).toList();
   }
 
+  Future<void> recordMemoryAccesses(Iterable<String> memoryIds) async {
+    final ids = memoryIds
+        .map((id) => id.trim())
+        .where((id) => id.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (ids.isEmpty) return;
+    final placeholders = List<String>.filled(ids.length, '?').join(', ');
+    await store.database.rawUpdate(
+      'UPDATE memories '
+      'SET last_accessed_at = ?, '
+      'use_frequency = COALESCE(use_frequency, 0) + 1 '
+      'WHERE deleted_at IS NULL AND id IN ($placeholders)',
+      <Object?>[DateTime.now().toUtc().toIso8601String(), ...ids],
+    );
+  }
+
   Future<String> saveMemory({
     String? id,
     required String content,

@@ -691,20 +691,15 @@ class ToolService {
                   ),
           );
     final matches = scored.take(_limit(args['limit'])).toList();
-    final accessedAt = DateTime.now().toUtc().toIso8601String();
+    await content.recordMemoryAccesses(matches.map((entry) => entry.item.id));
+    final accessed = <String, MemoryEntry>{};
     for (final entry in matches) {
-      await store.database.update(
-        'memories',
-        <String, Object?>{
-          'last_accessed_at': accessedAt,
-          'use_frequency': entry.item.useFrequency + 1,
-        },
-        where: 'id = ?',
-        whereArgs: <Object?>[entry.item.id],
-      );
+      accessed[entry.item.id] = await _memory(entry.item.id);
     }
     return <String, Object?>{
-      'matches': matches.map((entry) => _publicMemory(entry.item)).toList(),
+      'matches': matches
+          .map((entry) => _publicMemory(accessed[entry.item.id]!))
+          .toList(),
       'total': matches.length,
     };
   }
@@ -748,6 +743,7 @@ class ToolService {
           ? ((jsonDecode(row['tags_json']! as String)) as List).cast<String>()
           : _normalizeTags(args['tags']),
     );
+    await content.recordMemoryAccesses(<String>[id]);
     return _publicMemory(await _memory(id, includeDeleted: true));
   }
 

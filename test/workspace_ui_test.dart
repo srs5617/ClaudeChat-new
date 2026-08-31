@@ -399,7 +399,10 @@ void main() {
     final ios = File('ios/Runner/AppDelegate.swift').readAsStringSync();
     final iosInfo = File('ios/Runner/Info.plist').readAsStringSync();
 
-    expect(app, contains("runtimeScope: 'file-\${item.id}'"));
+    expect(
+      app,
+      contains("runtimeScope: runtimeScope ?? 'file-\${item.id}'"),
+    );
     expect(app, contains("runtimeScope: 'workspace-\${file.workspaceId}'"));
     expect(android, contains('settings.domStorageEnabled = true'));
     expect(android, contains('settings.blockNetworkLoads = false'));

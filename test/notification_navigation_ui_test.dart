@@ -123,6 +123,40 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('runnable file detail exposes a play action', (tester) async {
+    await setViewport(tester);
+    final controller = AppController.visualAudit(scenario: 'content-rich');
+    controller.files = <UserFileRecord>[
+      UserFileRecord(
+        id: 'audit-html-file',
+        name: '预览.html',
+        type: 'html',
+        updatedAt: DateTime.utc(2026, 8, 17, 13, 30),
+      ),
+    ];
+    controller.visualAuditFileContents = <String, String>{
+      'audit-html-file': '<h1>历史对比</h1>',
+    };
+    final notice = AppNotice(
+      id: 'html-file-notice',
+      type: AppNoticeType.info,
+      text: '小机子创建了文件“预览.html”',
+      createdAt: DateTime.utc(2026, 8, 17, 13, 31),
+      target: AppSection.files,
+      entryId: 'audit-html-file',
+    );
+    controller.notifications = <AppNotice>[notice];
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    controller.activateNotification(notice);
+    await tester.pumpAndSettle();
+
+    expect(find.byTooltip('运行'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('memory notice routes to its entry and consumes navigation', (
     tester,
   ) async {

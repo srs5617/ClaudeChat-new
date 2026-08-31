@@ -38,7 +38,7 @@ void main() {
     final app = File('lib/app.dart').readAsStringSync();
 
     expect(platform, contains("'title': fallbackTitle"));
-    expect(app, contains('fallbackTitle: item.name'));
+    expect(app, contains('fallbackTitle: fallbackTitle ?? item.name'));
     expect(app, contains('fallbackTitle: file.name'));
   });
 }

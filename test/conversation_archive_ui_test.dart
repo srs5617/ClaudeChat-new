@@ -50,4 +50,37 @@ void main() {
 
     expect(Conversation.fromMap(value.toMap()).archivedAt, archivedAt);
   });
+
+  testWidgets('starred conversations use a filled star in the sidebar', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 900);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final controller = AppController.visualAudit(scenario: 'chat-rich');
+    addTearDown(controller.dispose);
+    final timestamp = DateTime.utc(2026, 8, 20, 10);
+    controller.conversations = <Conversation>[
+      Conversation(
+        id: 'starred-chat',
+        title: '已经收藏的对话',
+        starred: true,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    await tester.tap(find.byTooltip('打开侧边栏'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('已经收藏的对话'), findsOneWidget);
+    expect(find.byIcon(Icons.star_rounded), findsOneWidget);
+    expect(find.byTooltip('取消置顶'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }
