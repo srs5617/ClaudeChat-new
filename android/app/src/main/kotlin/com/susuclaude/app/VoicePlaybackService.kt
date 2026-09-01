@@ -20,6 +20,21 @@ class VoicePlaybackService : Service() {
         private const val actionStop = "com.susuclaude.app.VOICE_STOP"
 
         var onPlaybackComplete: (() -> Unit)? = null
+        @Volatile
+        private var activeInstance: VoicePlaybackService? = null
+
+        fun playbackState(): Map<String, Any> {
+            val current = activeInstance?.player
+            return mapOf(
+                "positionMs" to runCatching { current?.currentPosition ?: 0 }.getOrDefault(0),
+                "durationMs" to runCatching { current?.duration ?: 0 }.getOrDefault(0),
+                "playing" to runCatching { current?.isPlaying == true }.getOrDefault(false)
+            )
+        }
+
+        fun seekTo(positionMs: Int) {
+            runCatching { activeInstance?.player?.seekTo(positionMs.coerceAtLeast(0)) }
+        }
 
         fun play(
             context: Context,
@@ -54,6 +69,7 @@ class VoicePlaybackService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             getSystemService(NotificationManager::class.java).createNotificationChannel(
                 NotificationChannel(
@@ -172,6 +188,7 @@ class VoicePlaybackService : Service() {
     override fun onDestroy() {
         player?.release()
         player = null
+        if (activeInstance === this) activeInstance = null
         super.onDestroy()
     }
 

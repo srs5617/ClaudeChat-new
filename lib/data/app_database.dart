@@ -46,6 +46,19 @@ Future<void> ensureVoiceSchema({
 }
 
 @visibleForTesting
+Future<void> ensureVoiceGeneratedTextSchema({
+  required Future<void> Function(String sql) execute,
+  required Future<List<Map<String, Object?>>> Function(String sql) rawQuery,
+}) async {
+  final columns = await rawQuery('PRAGMA table_info(voice_assets)');
+  if (!columns.any((row) => row['name'] == 'generated_text')) {
+    await execute(
+      "ALTER TABLE voice_assets ADD COLUMN generated_text TEXT NOT NULL DEFAULT ''",
+    );
+  }
+}
+
+@visibleForTesting
 Future<void> ensureConversationArchiveSchema({
   required Future<void> Function(String sql) execute,
   required Future<List<Map<String, Object?>>> Function(String sql) rawQuery,
@@ -201,11 +214,25 @@ class AppDatabase {
             'applied_at': DateTime.now().toUtc().toIso8601String(),
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
+        if (oldVersion < 6) {
+          await ensureVoiceGeneratedTextSchema(
+            execute: database.execute,
+            rawQuery: database.rawQuery,
+          );
+          await database.insert('schema_migrations', <String, Object?>{
+            'version': 6,
+            'applied_at': DateTime.now().toUtc().toIso8601String(),
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
       },
       // Repair a previously interrupted v2 migration without deleting data.
       // All statements are idempotent, so complete databases remain unchanged.
       onOpen: (database) async {
         await ensureVoiceSchema(execute: database.execute);
+        await ensureVoiceGeneratedTextSchema(
+          execute: database.execute,
+          rawQuery: database.rawQuery,
+        );
         await ensureConversationArchiveSchema(
           execute: database.execute,
           rawQuery: database.rawQuery,

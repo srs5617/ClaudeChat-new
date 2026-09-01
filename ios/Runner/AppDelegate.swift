@@ -82,6 +82,20 @@ import WidgetKit
         self.playAudio(arguments, result: result)
       case "stopAudio":
         self.stopAudio(result: result)
+      case "getAudioPlaybackState":
+        let player = self.playbackPlayer
+        result([
+          "positionMs": Int((player?.currentTime ?? 0) * 1000),
+          "durationMs": Int((player?.duration ?? 0) * 1000),
+          "playing": player?.isPlaying ?? false,
+        ])
+      case "seekAudio":
+        if let player = self.playbackPlayer {
+          let milliseconds = (arguments["positionMs"] as? NSNumber)?.doubleValue ?? 0
+          player.currentTime = min(max(milliseconds / 1000, 0), player.duration)
+          self.updateSystemMediaPosition()
+        }
+        result(nil)
       case "updateWidget":
         let defaults = UserDefaults(suiteName: "group.com.susuclaude.app")
         defaults?.set(arguments["title"], forKey: "widgetTitle")
@@ -223,6 +237,14 @@ import WidgetKit
     try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
     nativeChannel?.invokeMethod("audioPlaybackComplete", arguments: nil)
     result(nil)
+  }
+
+  private func updateSystemMediaPosition() {
+    guard playbackUsesSystemMedia, let player = playbackPlayer else { return }
+    var info = MPNowPlayingInfoCenter.default().nowPlayingInfo ?? [:]
+    info[MPNowPlayingInfoPropertyElapsedPlaybackTime] = player.currentTime
+    info[MPNowPlayingInfoPropertyPlaybackRate] = player.isPlaying ? 1.0 : 0.0
+    MPNowPlayingInfoCenter.default().nowPlayingInfo = info
   }
 
   func audioPlayerDidFinishPlaying(_ player: AVAudioPlayer, successfully flag: Bool) {
@@ -595,7 +617,8 @@ private final class HtmlPreviewViewController: UIViewController, WKNavigationDel
   static func clearRuntime(_ value: String, completion: @escaping () -> Void) {
     let scope = safeRuntimeScope(value)
     let host = "\(scope).runtime.claudechat.local"
-    let store = WKWebsiteDataStore.default()
+    let active = activePreview?.runtimeScope == scope ? activePreview : nil
+    let store = active?.webView.configuration.websiteDataStore ?? WKWebsiteDataStore.default()
     let types = WKWebsiteDataStore.allWebsiteDataTypes()
     store.fetchDataRecords(ofTypes: types) { records in
       let scopedRecords = records.filter {
@@ -605,7 +628,11 @@ private final class HtmlPreviewViewController: UIViewController, WKNavigationDel
         DispatchQueue.main.async {
           if let preview = activePreview, preview.runtimeScope == scope {
             preview.webView.evaluateJavaScript(
-              "try{localStorage.clear();sessionStorage.clear();}catch(e){}"
+              """
+              try{localStorage.clear();sessionStorage.clear();}catch(e){}
+              if(window.caches){caches.keys().then(keys=>Promise.all(keys.map(key=>caches.delete(key))));}
+              if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(items=>items.forEach(item=>item.unregister()));}
+              """
             )
             preview.requestLatestDocument()
           }

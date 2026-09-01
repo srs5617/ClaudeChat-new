@@ -291,6 +291,7 @@ class ApiClient {
     bool stream = true,
     bool? thinkingEnabled,
     String? reasoningEffort,
+    bool clearHistoricalReasoning = false,
     int maxRounds = 10,
     Future<void>? abortTrigger,
     Map<String, Object?> diagnosticContext = const <String, Object?>{},
@@ -303,6 +304,7 @@ class ApiClient {
       model: model,
       enabled: thinkingEnabled,
       effort: reasoningEffort,
+      clearHistoricalReasoning: clearHistoricalReasoning,
     );
     final plainHistory = messages.indexed
         .map(
@@ -355,6 +357,8 @@ class ApiClient {
       'stream': stream,
       'thinkingRequested': reasoningRequest.isNotEmpty ? thinkingEnabled : null,
       'reasoningEffort': reasoningRequest['reasoning_effort'],
+      'clearsHistoricalReasoning':
+          (reasoningRequest['thinking'] as Map?)?['clear_thinking'] == true,
       'maxRounds': maxRounds,
     });
     final finalText = StringBuffer();
@@ -1018,12 +1022,7 @@ class ApiClient {
               sink.add(const <int>[]);
               return;
             }
-            sink.addError(
-              TimeoutException(
-                '长时间没有收到新数据',
-                responseIdleTimeout,
-              ),
-            );
+            sink.addError(TimeoutException('长时间没有收到新数据', responseIdleTimeout));
             sink.close();
           },
         )
@@ -1695,6 +1694,7 @@ class ApiClient {
     required String model,
     required bool? enabled,
     String? effort,
+    bool clearHistoricalReasoning = false,
   }) {
     if (enabled == null) return const <String, Object?>{};
     final host = endpoint.host.toLowerCase();
@@ -1705,7 +1705,10 @@ class ApiClient {
       return const <String, Object?>{};
     }
     final fields = <String, Object?>{
-      'thinking': <String, Object?>{'type': enabled ? 'enabled' : 'disabled'},
+      'thinking': <String, Object?>{
+        'type': enabled ? 'enabled' : 'disabled',
+        if (enabled && clearHistoricalReasoning) 'clear_thinking': true,
+      },
     };
     // GLM-5.2 documents reasoning_effort. Older GLM endpoints may reject it,
     // so keep the compatibility boundary deliberately narrow.

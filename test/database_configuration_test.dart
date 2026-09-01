@@ -39,6 +39,28 @@ void main() {
     },
   );
 
+  test('voice generated text repair only adds a missing column', () async {
+    final executed = <String>[];
+
+    await ensureVoiceGeneratedTextSchema(
+      execute: (sql) async => executed.add(sql),
+      rawQuery: (_) async => <Map<String, Object?>>[
+        <String, Object?>{'name': 'id'},
+      ],
+    );
+    expect(executed.single, contains('ADD COLUMN generated_text'));
+
+    executed.clear();
+    await ensureVoiceGeneratedTextSchema(
+      execute: (sql) async => executed.add(sql),
+      rawQuery: (_) async => <Map<String, Object?>>[
+        <String, Object?>{'name': 'id'},
+        <String, Object?>{'name': 'generated_text'},
+      ],
+    );
+    expect(executed, isEmpty);
+  });
+
   test('conversation archive repair only adds a missing column', () async {
     final executed = <String>[];
 

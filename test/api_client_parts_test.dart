@@ -86,6 +86,57 @@ void main() {
     expect(payload['reasoning_effort'], 'max');
   });
 
+  test(
+    'can explicitly restart thinking without replaying old reasoning',
+    () async {
+      final client = _QueueClient(<String>[
+        jsonEncode(<String, Object?>{
+          'choices': <Object?>[
+            <String, Object?>{
+              'message': <String, Object?>{
+                'reasoning_content': '这一轮重新思考',
+                'content': '继续回答',
+              },
+            },
+          ],
+        }),
+      ]);
+      final api = ApiClient(SecureVault(), client: client);
+
+      final result = await api.chatWithTools(
+        profile: const ApiProfile(
+          id: 'zhipu',
+          name: '智谱',
+          endpoint: 'https://open.bigmodel.cn/api/paas/v4',
+        ),
+        model: 'glm-5.2',
+        messages: <ChatMessage>[_message],
+        systemPrompt: '',
+        tools: const <Map<String, Object?>>[],
+        executeTool: (_, _, _) async => '{}',
+        stream: false,
+        thinkingEnabled: true,
+        reasoningEffort: 'max',
+        clearHistoricalReasoning: true,
+      );
+
+      final payload =
+          jsonDecode(client.requests.single) as Map<String, Object?>;
+      expect(payload['thinking'], <String, Object?>{
+        'type': 'enabled',
+        'clear_thinking': true,
+      });
+      final history = payload['messages']! as List<Object?>;
+      expect(
+        history.whereType<Map>().any(
+          (message) => message.containsKey('reasoning_content'),
+        ),
+        isFalse,
+      );
+      expect(result.parts.first.content, '这一轮重新思考');
+    },
+  );
+
   test('does not send provider-specific thinking fields to gateways', () async {
     final client = _QueueClient(<String>[
       jsonEncode(<String, Object?>{
@@ -1097,51 +1148,51 @@ void main() {
     expect(result.text, '持续传输');
   });
 
-  test('stream idle timeout stays alive while a file tool is streaming', () async {
-    final diagnostics = <Map<String, Object?>>[];
-    final progress = <ChatCompletionPart?>[];
-    final api = ApiClient(
-      SecureVault(),
-      client: _FileToolPauseClient(),
-      responseIdleTimeout: const Duration(milliseconds: 25),
-      toolProgressMinDuration: Duration.zero,
-    );
+  test(
+    'stream idle timeout stays alive while a file tool is streaming',
+    () async {
+      final diagnostics = <Map<String, Object?>>[];
+      final progress = <ChatCompletionPart?>[];
+      final api = ApiClient(
+        SecureVault(),
+        client: _FileToolPauseClient(),
+        responseIdleTimeout: const Duration(milliseconds: 25),
+        toolProgressMinDuration: Duration.zero,
+      );
 
-    final result = await api.chatWithTools(
-      profile: _profile,
-      model: 'test-model',
-      messages: <ChatMessage>[_message],
-      systemPrompt: '',
-      tools: const <Map<String, Object?>>[],
-      executeTool: (_, name, arguments) async => jsonEncode(
-        <String, Object?>{
+      final result = await api.chatWithTools(
+        profile: _profile,
+        model: 'test-model',
+        messages: <ChatMessage>[_message],
+        systemPrompt: '',
+        tools: const <Map<String, Object?>>[],
+        executeTool: (_, name, arguments) async => jsonEncode(<String, Object?>{
           'ok': true,
           'tool': name,
           'verified': true,
           'name': arguments['name'],
-        },
-      ),
-      onToolProgress: progress.add,
-      onDiagnostic: diagnostics.add,
-    );
+        }),
+        onToolProgress: progress.add,
+        onDiagnostic: diagnostics.add,
+      );
 
-    expect(result.text, '文件已保存');
-    expect(
-      progress.whereType<ChatCompletionPart>().any(
-        (part) =>
-            part.metadata['name'] == 'create_workspace_file' &&
-            part.metadata['status'] == 'preparing',
-      ),
-      isTrue,
-    );
-    expect(
-      diagnostics.any(
-        (event) =>
-            event['event'] == 'response_idle_extended_for_file_tool',
-      ),
-      isTrue,
-    );
-  });
+      expect(result.text, '文件已保存');
+      expect(
+        progress.whereType<ChatCompletionPart>().any(
+          (part) =>
+              part.metadata['name'] == 'create_workspace_file' &&
+              part.metadata['status'] == 'preparing',
+        ),
+        isTrue,
+      );
+      expect(
+        diagnostics.any(
+          (event) => event['event'] == 'response_idle_extended_for_file_tool',
+        ),
+        isTrue,
+      );
+    },
+  );
 
   test(
     'retries a truncated streamed tool call without executing partial JSON',
@@ -1361,9 +1412,7 @@ class _FileToolPauseClient extends http.BaseClient {
               'tool_calls': <Object?>[
                 <String, Object?>{
                   'index': 0,
-                  'function': <String, Object?>{
-                    'arguments': r'print(42)"}',
-                  },
+                  'function': <String, Object?>{'arguments': r'print(42)"}'},
                 },
               ],
             },

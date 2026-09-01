@@ -29,4 +29,16 @@ void main() {
       expect(source, contains('创建文件（从现存最早版本恢复）'));
     },
   );
+
+  test('workspace file version labels are sequential per file', () {
+    final source = File(
+      'lib/services/content_repository.dart',
+    ).readAsStringSync();
+    expect(
+      source,
+      contains(r'entry.$2.withSequence(versions.length - entry.$1)'),
+    );
+    expect(source, contains('final ordered = await workspaceFileVersions('));
+    expect(source, contains('fileId: rawVersion.fileId'));
+  });
 }

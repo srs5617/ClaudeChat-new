@@ -20,7 +20,6 @@ import 'domain/entities.dart';
 import 'services/attachment_service.dart';
 import 'services/api_client.dart';
 import 'services/content_repository.dart';
-import 'services/context_budget.dart';
 import 'services/settings_service.dart';
 import 'services/tool_service.dart';
 import 'services/voice_service.dart';
@@ -2074,9 +2073,7 @@ class _ActionableNoticeBar extends StatelessWidget {
                 child: SizedBox(
                   height: 34,
                   child: Padding(
-                    padding: EdgeInsets.symmetric(
-                      horizontal: expanded ? 12 : 0,
-                    ),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
                     child: Row(
                       children: <Widget>[
                         _NoticeDot(type: latest.type),
@@ -3355,6 +3352,16 @@ class _MessageBubble extends StatelessWidget {
                     messageParts,
                     fallbackReasoning: reasoning,
                   ),
+                if (!streaming &&
+                    !user &&
+                    controller.voiceForMessage(message.id) != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: _MessageVoiceBar(
+                      controller: controller,
+                      asset: controller.voiceForMessage(message.id)!,
+                    ),
+                  ),
                 if (!streaming)
                   FutureBuilder<List<PendingAttachment>>(
                     future: message.id.startsWith('private-')
@@ -4019,6 +4026,105 @@ class _MessageBubble extends StatelessWidget {
   }
 }
 
+class _MessageVoiceBar extends StatelessWidget {
+  const _MessageVoiceBar({required this.controller, required this.asset});
+
+  final AppController controller;
+  final VoiceAsset asset;
+
+  @override
+  Widget build(BuildContext context) {
+    final dark = Theme.of(context).brightness == Brightness.dark;
+    final playing = controller.playingVoiceId == asset.id;
+    final duration = playing && controller.audioPlaybackDurationMs > 0
+        ? controller.audioPlaybackDurationMs
+        : (asset.durationMs ?? 0);
+    final position = playing ? controller.audioPlaybackPositionMs : 0;
+    final progress = duration <= 0
+        ? 0.0
+        : (position / duration).clamp(0.0, 1.0);
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 430),
+      child: Container(
+        height: 58,
+        padding: const EdgeInsets.symmetric(horizontal: 9),
+        decoration: BoxDecoration(
+          color: dark ? _darkSurface : _lightSurfaceSoft,
+          border: Border.all(color: dark ? _darkLine : _lightLine),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: <Widget>[
+            SizedBox.square(
+              dimension: 40,
+              child: IconButton.filled(
+                onPressed: () => controller.playVoice(asset),
+                style: IconButton.styleFrom(backgroundColor: _accent),
+                icon: Icon(
+                  playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                tooltip: playing ? '暂停语音' : '播放语音',
+              ),
+            ),
+            const SizedBox(width: 7),
+            Expanded(
+              child: SliderTheme(
+                data: SliderTheme.of(context).copyWith(
+                  trackHeight: 3,
+                  activeTrackColor: _accent,
+                  inactiveTrackColor: _accent.withValues(alpha: .18),
+                  thumbColor: _accent,
+                  thumbShape: const RoundSliderThumbShape(
+                    enabledThumbRadius: 6,
+                  ),
+                  overlayShape: SliderComponentShape.noOverlay,
+                ),
+                child: Slider(
+                  value: progress,
+                  onChanged: duration > 0
+                      ? (value) => unawaited(controller.seekVoice(asset, value))
+                      : null,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 42,
+              child: Text(
+                _voiceTime(duration > 0 ? duration - position : 0),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            IconButton(
+              onPressed: () => controller.voice
+                  .setFavorite(asset, !asset.favorite)
+                  .then((_) => controller.refreshVoices()),
+              tooltip: asset.favorite ? '取消收藏' : '收藏到 Ta的声音',
+              icon: Icon(
+                asset.favorite ? Icons.favorite : Icons.favorite_border,
+                color: asset.favorite ? _accent : _lightMuted,
+                size: 19,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _voiceTime(int milliseconds) {
+    final seconds = (milliseconds / 1000).ceil().clamp(0, 359999);
+    final minutes = seconds ~/ 60;
+    return '$minutes:${(seconds % 60).toString().padLeft(2, '0')}';
+  }
+}
+
 class _LegacyUserMessage extends StatefulWidget {
   const _LegacyUserMessage({
     required this.controller,
@@ -4094,14 +4200,6 @@ class _LegacyUserMessageState extends State<_LegacyUserMessage> {
                     height: 1.5,
                   ),
                 ),
-                if (!widget.streaming &&
-                    widget.message.content.isNotEmpty) ...<Widget>[
-                  const SizedBox(height: 2),
-                  _MessageTokenLabel(
-                    controller: widget.controller,
-                    message: widget.message,
-                  ),
-                ],
               ],
             ),
           ),
@@ -4570,30 +4668,6 @@ class _SafeLinkPreviewPageState extends State<_SafeLinkPreviewPage> {
   );
 }
 
-class _MessageTokenLabel extends StatelessWidget {
-  const _MessageTokenLabel({required this.controller, required this.message});
-
-  final AppController controller;
-  final ChatMessage message;
-
-  @override
-  Widget build(BuildContext context) {
-    final ratio =
-        (controller.settings['tokenEstimateRatio'] as num?)?.toDouble() ?? 1;
-    final value = (ContextBudget.estimateText(message.content) * ratio).ceil();
-    return Text(
-      _usageNumber(value),
-      style: TextStyle(
-        fontSize: 10,
-        height: 1.5,
-        color: Theme.of(
-          context,
-        ).colorScheme.onSurfaceVariant.withValues(alpha: .35),
-      ),
-    );
-  }
-}
-
 class _AttachmentGallery extends StatelessWidget {
   const _AttachmentGallery({required this.controller, required this.items});
 
@@ -4938,6 +5012,7 @@ class _ToolCapsule extends StatelessWidget {
       'restore_workspace_file_version' => '恢复了文件历史版本',
       'set_greeting' => '修改了欢迎语${quoted(result['greeting'])}',
       'set_splash_phrases' => '修改了开屏语${quoted(result['phrases'])}',
+      'generate_voice' => '说了一段语音${quoted(arguments['text'])}',
       'create_memory' => '创建了记忆${quoted(arguments['content'])}',
       'update_memory' => '编辑了记忆${quoted(arguments['content'])}',
       'delete_memory' => '删除了记忆${quoted(arguments['content'])}',
@@ -4950,6 +5025,7 @@ class _ToolCapsule extends StatelessWidget {
   }
 
   _LegacyIconKind _toolIcon(String name) {
+    if (name == 'generate_voice') return _LegacyIconKind.waveform;
     if (name.contains('search')) return _LegacyIconKind.search;
     if (name.contains('memory')) return _LegacyIconKind.brain;
     if (name.contains('diary')) return _LegacyIconKind.book;
@@ -5033,6 +5109,8 @@ class _ToolProgressCapsule extends StatelessWidget {
       ('set_greeting', true) => '小机子正在修改欢迎语',
       ('set_splash_phrases', false) => '小机子准备修改开屏语',
       ('set_splash_phrases', true) => '小机子正在修改开屏语',
+      ('generate_voice', false) => '小机子准备说话',
+      ('generate_voice', true) => '小机子正在说话',
       ('create_calendar_event', false) => '小机子准备创建日历日程',
       ('create_calendar_event', true) => '小机子正在写入系统日历',
       ('schedule_notification', false) => '小机子准备创建通知',
@@ -8983,6 +9061,33 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
               child: OutlinedButton(
                 onPressed: controller.workspaceBusy
                     ? null
+                    : () => _importWorkspace(context),
+                style: OutlinedButton.styleFrom(
+                  padding: EdgeInsets.zero,
+                  minimumSize: const Size(58, 32),
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
+                  side: BorderSide(color: dark ? _darkLine : _lightLine),
+                  foregroundColor: muted,
+                  textStyle: TextStyle(
+                    fontFamily: _selectedFontFamily(controller.settings),
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                child: const Text('导入'),
+              ),
+            ),
+            const SizedBox(width: 6),
+            SizedBox(
+              width: 58,
+              height: 32,
+              child: OutlinedButton(
+                onPressed: controller.workspaceBusy
+                    ? null
                     : () => _exportWorkspace(context),
                 style: OutlinedButton.styleFrom(
                   padding: EdgeInsets.zero,
@@ -10365,6 +10470,21 @@ class _WorkspacesPageState extends State<_WorkspacesPage> {
     }
   }
 
+  Future<void> _importWorkspace(BuildContext context) async {
+    try {
+      final count = await controller.importFilesToActiveWorkspace();
+      if (!context.mounted || count == 0) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('已导入 $count 个工作区文件')));
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('导入失败：$error')));
+    }
+  }
+
   String _workspaceCapability(String type) => switch (type) {
     'react' =>
       'React / JSX / TSX 可在 Android 与 iOS 直接编译运行，并在与其他工作区隔离的安全环境中显示；首次运行需联网加载固定版本编译组件。React 核心依赖已支持，其他 npm 包需提交 dist/build 产物。',
@@ -11675,7 +11795,7 @@ class _VoiceLibraryRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 5),
                   Text(
-                    '${asset.model.isEmpty ? asset.provider : asset.model} · ${asset.roleName}',
+                    '${controller.voiceProfileName(asset)} · ${asset.roleName}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
@@ -11895,7 +12015,7 @@ class _VoiceDetailPageState extends State<_VoiceDetailPage>
                     ),
                     const SizedBox(height: 34),
                     Text(
-                      asset.model.isEmpty ? asset.provider : asset.model,
+                      widget.controller.voiceProfileName(asset),
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 14,
@@ -12073,9 +12193,7 @@ class _MessageVoicesPageState extends State<_MessageVoicesPage> {
                               ),
                               title: Text('声音 ${asset.numberLabel}'),
                               subtitle: Text(
-                                asset.model.isEmpty
-                                    ? asset.provider
-                                    : asset.model,
+                                widget.controller.voiceProfileName(asset),
                               ),
                               trailing: Icon(
                                 asset.bound
@@ -12676,6 +12794,9 @@ class _SettingsPageState extends State<_SettingsPage> {
     Map<String, Object?>? value,
   ]) async {
     final label = TextEditingController(text: '${value?['label'] ?? ''}');
+    final description = TextEditingController(
+      text: '${value?['description'] ?? ''}',
+    );
     var apiProfileId = '${value?['apiProfileId'] ?? ''}';
     var apiName = '${value?['apiName'] ?? ''}';
     var stream = value?['stream'] != false;
@@ -12721,6 +12842,14 @@ class _SettingsPageState extends State<_SettingsPage> {
                     TextField(
                       controller: label,
                       decoration: const InputDecoration(labelText: '模型显示名'),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: description,
+                      decoration: const InputDecoration(
+                        labelText: '下拉描述',
+                        hintText: '例如：日常聊天和创作',
+                      ),
                     ),
                     const SizedBox(height: 12),
                     _LegacySelect(
@@ -12852,6 +12981,7 @@ class _SettingsPageState extends State<_SettingsPage> {
       await controller.saveModelSlot(<String, Object?>{
         'id': '${value?['id'] ?? _uuid.v4()}',
         'label': label.text.trim().isEmpty ? apiName : label.text.trim(),
+        'description': description.text.trim(),
         'apiProfileId': apiProfileId,
         'apiName': apiName,
         'stream': stream,
@@ -12860,6 +12990,7 @@ class _SettingsPageState extends State<_SettingsPage> {
       });
     }
     label.dispose();
+    description.dispose();
     contextTokens.dispose();
   }
 
@@ -13848,22 +13979,14 @@ class _LegacyVoiceSettingsPanelState extends State<_LegacyVoiceSettingsPanel> {
           ),
         ),
         const SizedBox(height: 10),
-        Row(
-          children: <Widget>[
-            Expanded(
-              child: TextField(
-                controller: model,
-                decoration: const InputDecoration(labelText: '模型名称'),
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: TextField(
-                controller: voiceId,
-                decoration: const InputDecoration(labelText: '音色 / Voice ID'),
-              ),
-            ),
-          ],
+        TextField(
+          controller: model,
+          decoration: const InputDecoration(labelText: '模型名称'),
+        ),
+        const SizedBox(height: 10),
+        TextField(
+          controller: voiceId,
+          decoration: const InputDecoration(labelText: '音色 / Voice ID'),
         ),
         const SizedBox(height: 10),
         TextField(
@@ -14528,6 +14651,7 @@ class _LegacyToolboxSettingsPanel extends StatelessWidget {
     'edit_file' ||
     'set_greeting' ||
     'set_splash_phrases' => _LegacyIconKind.edit,
+    'generate_voice' => _LegacyIconKind.waveform,
     'read_file' || 'create_file' => _LegacyIconKind.file,
     _ => _LegacyIconKind.tool,
   };
@@ -14627,6 +14751,7 @@ class _LegacyModelCard extends StatefulWidget {
 class _LegacyModelCardState extends State<_LegacyModelCard> {
   late Map<String, Object?> slot;
   late final TextEditingController labelController;
+  late final TextEditingController descriptionController;
   late final TextEditingController contextController;
 
   @override
@@ -14634,6 +14759,9 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
     super.initState();
     slot = Map<String, Object?>.of(widget.slot);
     labelController = TextEditingController(text: '${slot['label'] ?? ''}');
+    descriptionController = TextEditingController(
+      text: '${slot['description'] ?? ''}',
+    );
     contextController = TextEditingController(
       text: slot['contextTokens'] == null
           ? ''
@@ -14644,6 +14772,7 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
   @override
   void dispose() {
     labelController.dispose();
+    descriptionController.dispose();
     contextController.dispose();
     super.dispose();
   }
@@ -14658,6 +14787,13 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
         labelController.value = TextEditingValue(
           text: nextLabel,
           selection: TextSelection.collapsed(offset: nextLabel.length),
+        );
+      }
+      final nextDescription = '${slot['description'] ?? ''}';
+      if (descriptionController.text != nextDescription) {
+        descriptionController.value = TextEditingValue(
+          text: nextDescription,
+          selection: TextSelection.collapsed(offset: nextDescription.length),
         );
       }
       final nextContext = slot['contextTokens'] == null
@@ -14827,6 +14963,37 @@ class _LegacyModelCardState extends State<_LegacyModelCard> {
                     ),
                   ),
                 ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 8, 12, 2),
+            child: SizedBox(
+              height: 40,
+              child: TextFormField(
+                controller: descriptionController,
+                style: const TextStyle(fontSize: 12.6, height: 1.2),
+                decoration: InputDecoration(
+                  hintText: '下拉描述，例如：日常聊天和创作',
+                  filled: true,
+                  fillColor: surface,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: BorderSide(color: line),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                    borderSide: const BorderSide(color: _accent),
+                  ),
+                ),
+                onChanged: (value) => unawaited(_save('description', value)),
               ),
             ),
           ),
@@ -16522,6 +16689,7 @@ String _toolLabel(String name) => switch (name) {
   'fetch_url' => '抓取网页',
   'set_greeting' => '修改欢迎语',
   'set_splash_phrases' => '修改开屏语',
+  'generate_voice' => '生成语音条',
   'create_calendar_event' => '创建系统日历日程',
   'schedule_notification' => '创建本地通知',
   'create_system_reminder' => '创建系统提醒事项',
@@ -16556,6 +16724,7 @@ String _toolLifecycleNoun(String name) => switch (name) {
   'fetch_url' => '网页读取',
   'set_greeting' => '欢迎语修改',
   'set_splash_phrases' => '开屏语修改',
+  'generate_voice' => '语音生成',
   'create_calendar_event' => '日历日程创建',
   'schedule_notification' => '本地通知创建',
   'create_system_reminder' => '提醒事项创建',
@@ -16601,6 +16770,7 @@ String _toolProcessLabel(ChatCompletionPart part) {
     'web_search' => '小机子$verb搜索网络',
     'fetch_url' => '小机子$verb读取网页',
     'get_time' => '小机子$verb读取当前时间',
+    'generate_voice' => '小机子${preparing ? '准备说话' : '正在说话'}',
     _ => '小机子$verb${_toolLifecycleNoun(name)}',
   };
 }
@@ -16634,6 +16804,7 @@ String _legacyToolDescription(String name) => switch (name) {
   'delete_file' => '删除文件区中的一个文件（软删除，前端保留记录）。使用文件UUID（id），需要提供删除原因。',
   'set_greeting' => '修改对话首页欢迎语。当用户想让你更改欢迎问候时使用此工具。',
   'set_splash_phrases' => '修改开屏语列表。用户可能需要更新应用开屏时的问候语。',
+  'generate_voice' => '使用已配置的语音接口生成一条可播放、可收藏的语音。',
   _ =>
     ToolService.definitions
             .where((tool) => tool.name == name)

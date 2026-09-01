@@ -132,7 +132,7 @@ void main() {
     expect(controller.actionableNotifications, hasLength(3));
   });
 
-  test('actionable notice rows keep the legacy oldest-first ordering', () {
+  test('actionable notices show approvals first and newest first', () {
     final controller = AppController.visualAudit();
     controller.notifications = <AppNotice>[
       AppNotice(
@@ -156,12 +156,24 @@ void main() {
         createdAt: DateTime.utc(2026, 8, 17, 12, 1),
         target: AppSection.memories,
       ),
+      AppNotice(
+        id: 'approval',
+        type: AppNoticeType.danger,
+        text: '需要审批',
+        createdAt: DateTime.utc(2026, 8, 17, 11, 59),
+        approval: const ToolRequest(
+          callId: 'approval-order',
+          name: 'delete_memory',
+          arguments: <String, Object?>{'id': 'memory-1'},
+        ),
+      ),
     ];
 
     expect(controller.actionableNotifications.map((item) => item.id), <String>[
-      'oldest',
-      'middle',
+      'approval',
       'newer',
+      'middle',
+      'oldest',
     ]);
   });
 

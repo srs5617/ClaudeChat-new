@@ -41,4 +41,36 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('imports the complete text tree from an exported zip package', () {
+    final bytes = WorkspaceExportService.buildZip(<String, String>{
+      'src/main.py': 'print("hello")',
+      'assets/cards/data.json': '{"card": 1}',
+    });
+
+    expect(WorkspaceExportService.readZip(bytes), <String, String>{
+      'src/main.py': 'print("hello")',
+      'assets/cards/data.json': '{"card": 1}',
+    });
+  });
+
+  test('rejects unsafe paths and binary files while importing', () {
+    final unsafeArchive = Archive()
+      ..addFile(ArchiveFile('../secret.txt', 4, utf8.encode('nope')));
+    expect(
+      () => WorkspaceExportService.readZip(
+        ZipEncoder().encodeBytes(unsafeArchive),
+      ),
+      throwsFormatException,
+    );
+
+    final binaryArchive = Archive()
+      ..addFile(ArchiveFile('photo.bin', 2, <int>[0xff, 0xfe]));
+    expect(
+      () => WorkspaceExportService.readZip(
+        ZipEncoder().encodeBytes(binaryArchive),
+      ),
+      throwsFormatException,
+    );
+  });
 }

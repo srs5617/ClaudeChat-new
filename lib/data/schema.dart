@@ -1,4 +1,4 @@
-const int databaseVersion = 5;
+const int databaseVersion = 6;
 
 const List<String> workspaceConversationSchemaStatements = <String>[
   '''CREATE TABLE IF NOT EXISTS workspace_conversations (
@@ -67,6 +67,7 @@ const List<String> voiceSchemaStatements = <String>[
     endpoint TEXT NOT NULL,
     model TEXT NOT NULL DEFAULT '',
     voice_id TEXT NOT NULL DEFAULT '',
+    generated_text TEXT NOT NULL DEFAULT '',
     output_format TEXT NOT NULL DEFAULT 'mp3',
     options_json TEXT NOT NULL DEFAULT '{}',
     custom_headers_json TEXT NOT NULL DEFAULT '{}',

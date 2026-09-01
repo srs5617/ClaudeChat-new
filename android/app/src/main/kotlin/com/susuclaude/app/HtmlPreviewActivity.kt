@@ -29,16 +29,22 @@ class HtmlPreviewActivity : Activity() {
 
     companion object {
         private val activePreviews = mutableMapOf<String, WeakReference<HtmlPreviewActivity>>()
+        private val invalidatedScopes = mutableSetOf<String>()
 
         fun clearRuntime(value: String) {
             val scope = safeRuntimeScope(value)
+            synchronized(invalidatedScopes) { invalidatedScopes.add(scope) }
             WebStorage.getInstance().deleteOrigin("https://$scope.runtime.claudechat.local")
             val activity = synchronized(activePreviews) { activePreviews[scope]?.get() }
             activity?.runOnUiThread {
                 activity.preview?.evaluateJavascript(
-                    "try{localStorage.clear();sessionStorage.clear();}catch(e){}",
+                    "try{localStorage.clear();sessionStorage.clear();}catch(e){};" +
+                        "if(window.caches){caches.keys().then(function(keys){return Promise.all(keys.map(function(key){return caches.delete(key);}));});}" +
+                        "if(navigator.serviceWorker){navigator.serviceWorker.getRegistrations().then(function(items){items.forEach(function(item){item.unregister();});});}",
                     null
                 )
+                activity.preview?.clearCache(true)
+                synchronized(invalidatedScopes) { invalidatedScopes.remove(scope) }
                 activity.requestLatestDocument()
             }
         }
@@ -132,6 +138,9 @@ class HtmlPreviewActivity : Activity() {
                     val htmlTitle = view.title.orEmpty().trim()
                     titleView?.text = htmlTitle.ifEmpty { fallbackTitle }
                 }
+            }
+            if (synchronized(invalidatedScopes) { invalidatedScopes.remove(runtimeScope) }) {
+                clearCache(true)
             }
         }
         root.addView(

@@ -13,6 +13,18 @@ class PickedRingtone {
   final String? uri;
 }
 
+class AudioPlaybackState {
+  const AudioPlaybackState({
+    required this.positionMs,
+    required this.durationMs,
+    required this.playing,
+  });
+
+  final int positionMs;
+  final int durationMs;
+  final bool playing;
+}
+
 class PlatformService {
   PlatformService();
 
@@ -270,6 +282,22 @@ class PlatformService {
   });
 
   Future<void> stopAudio() => _channel.invokeMethod<void>('stopAudio');
+
+  Future<AudioPlaybackState> audioPlaybackState() async {
+    final value = await _channel.invokeMapMethod<String, Object?>(
+      'getAudioPlaybackState',
+    );
+    return AudioPlaybackState(
+      positionMs: (value?['positionMs'] as num?)?.round() ?? 0,
+      durationMs: (value?['durationMs'] as num?)?.round() ?? 0,
+      playing: value?['playing'] == true,
+    );
+  }
+
+  Future<void> seekAudio(int positionMs) => _channel.invokeMethod<void>(
+    'seekAudio',
+    <String, Object?>{'positionMs': positionMs.clamp(0, 1 << 31)},
+  );
 
   /// Keeps an in-flight model request alive for as long as the host OS allows.
   /// Android uses a foreground service. iOS uses a finite UIKit background task

@@ -474,6 +474,27 @@ class ToolService {
       },
     ),
     ToolDefinition(
+      name: 'generate_voice',
+      label: '生成语音条',
+      description:
+          '使用用户已配置的语音接口，把准备说给用户听的内容生成一条可播放、可收藏的语音。仅在用户要求语音表达，或语音明显比文字更合适时调用。',
+      parameters: <String, Object?>{
+        'type': 'object',
+        'required': <String>['text'],
+        'properties': <String, Object?>{
+          'text': <String, String>{
+            'type': 'string',
+            'description': '需要生成语音的完整内容。',
+          },
+          'profileId': <String, String>{
+            'type': 'string',
+            'description': '可选的语音接口ID；留空时使用当前启用的语音接口。',
+          },
+        },
+        'additionalProperties': false,
+      },
+    ),
+    ToolDefinition(
       name: 'create_calendar_event',
       description: '在用户系统日历中创建日程。',
       parameters: <String, Object?>{
@@ -563,6 +584,7 @@ class ToolService {
     'delete_file',
     'set_greeting',
     'set_splash_phrases',
+    'generate_voice',
   ];
 
   static List<ToolDefinition> get legacyChatDefinitions => legacyChatToolNames
@@ -1127,9 +1149,7 @@ class ToolService {
             .trim()
             .isEmpty
         ? 'text'
-        : (requestedType.isEmpty
-              ? _type(item.name)
-              : requestedType);
+        : (requestedType.isEmpty ? _type(item.name) : requestedType);
     final receipt = await content.saveTextFile(
       id: item.id,
       name: item.name,
@@ -1195,20 +1215,14 @@ class ToolService {
     Map<String, Object?> args, {
     bool includeDeleted = false,
   }) async {
-    final directId = <Object?>[
-      args['id'],
-      args['fileId'],
-      args['file_id'],
-    ]
+    final directId = <Object?>[args['id'], args['fileId'], args['file_id']]
         .map((value) => '${value ?? ''}'.trim())
         .where((value) => value.isNotEmpty)
         .firstOrNull;
     if (directId != null) {
       final directRows = await store.database.query(
         'user_files',
-        where: includeDeleted
-            ? 'id = ?'
-            : 'id = ? AND deleted_at IS NULL',
+        where: includeDeleted ? 'id = ?' : 'id = ? AND deleted_at IS NULL',
         whereArgs: <Object?>[directId],
         limit: 1,
       );
@@ -1259,9 +1273,7 @@ class ToolService {
         where: includeDeleted
             ? 'name = ? COLLATE NOCASE'
             : 'name = ? COLLATE NOCASE AND status = ? AND deleted_at IS NULL',
-        whereArgs: includeDeleted
-            ? <Object?>[name]
-            : <Object?>[name, 'active'],
+        whereArgs: includeDeleted ? <Object?>[name] : <Object?>[name, 'active'],
         orderBy: 'updated_at DESC',
         limit: 2,
       );

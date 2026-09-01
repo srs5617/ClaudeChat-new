@@ -49,6 +49,23 @@ class WorkspaceExportService {
     return ZipEncoder().encodeBytes(archive);
   }
 
+  static Map<String, String> readZip(List<int> bytes) {
+    final archive = ZipDecoder().decodeBytes(bytes, verify: true);
+    final output = <String, String>{};
+    for (final entry in archive.files.where((file) => file.isFile)) {
+      final path = normalizeEntryPath(entry.name);
+      final data = entry.readBytes();
+      if (data == null) continue;
+      try {
+        output[path] = utf8.decode(data, allowMalformed: false);
+      } on FormatException {
+        throw FormatException('暂不支持导入二进制文件：$path');
+      }
+    }
+    if (output.isEmpty) throw const FormatException('ZIP 文件包中没有可导入的文本文件');
+    return output;
+  }
+
   static String normalizeEntryPath(String value) {
     final source = value.trim().replaceAll('\\', '/');
     if (source.isEmpty ||

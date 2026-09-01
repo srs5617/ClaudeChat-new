@@ -316,6 +316,23 @@ class WorkspaceFileVersionRecord {
   final String trigger;
   final DateTime createdAt;
 
+  WorkspaceFileVersionRecord withSequence(int value) =>
+      WorkspaceFileVersionRecord(
+        id: id,
+        commitId: commitId,
+        workspaceId: workspaceId,
+        fileId: fileId,
+        name: name,
+        type: type,
+        relativePath: relativePath,
+        sha256: sha256,
+        byteSize: byteSize,
+        sequence: value,
+        message: message,
+        trigger: trigger,
+        createdAt: createdAt,
+      );
+
   factory WorkspaceFileVersionRecord.fromMap(Map<String, Object?> map) =>
       WorkspaceFileVersionRecord(
         id: map['id']! as String,
@@ -1522,9 +1539,12 @@ class ContentRepository {
       args,
     );
     final seenHashes = <String>{};
-    return rows
+    final versions = rows
         .map(WorkspaceFileVersionRecord.fromMap)
         .where((version) => seenHashes.add(version.sha256.toLowerCase()))
+        .toList(growable: false);
+    return versions.indexed
+        .map((entry) => entry.$2.withSequence(versions.length - entry.$1))
         .toList(growable: false);
   }
 
@@ -1542,7 +1562,14 @@ class ContentRepository {
       <Object?>[versionId, workspaceId],
     );
     if (rows.isEmpty) throw StateError('工作区文件版本不存在：$versionId');
-    final version = WorkspaceFileVersionRecord.fromMap(rows.single);
+    final rawVersion = WorkspaceFileVersionRecord.fromMap(rows.single);
+    final ordered = await workspaceFileVersions(
+      workspaceId: workspaceId,
+      fileId: rawVersion.fileId,
+    );
+    final version =
+        ordered.where((item) => item.id == versionId).firstOrNull ??
+        rawVersion.withSequence(1);
     final snapshot = File(
       '${store.paths.files.path}${Platform.pathSeparator}${version.relativePath.replaceAll('/', Platform.pathSeparator)}',
     );

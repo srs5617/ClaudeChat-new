@@ -20,7 +20,7 @@ void main() {
     PlatformService(),
   );
 
-  test('all 19 legacy chat tools remain present in original order', () {
+  test('legacy chat tools remain present in original order', () {
     const legacyNames = <String, String>{
       'get_time': '读取当前时间',
       'search_memory': '搜索记忆',
@@ -41,6 +41,7 @@ void main() {
       'delete_file': '删除文件',
       'set_greeting': '修改欢迎语',
       'set_splash_phrases': '修改开屏语',
+      'generate_voice': '生成语音条',
     };
 
     expect(

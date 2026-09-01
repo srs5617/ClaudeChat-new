@@ -287,7 +287,7 @@ class VoiceService {
 
   Future<List<VoiceAsset>> assets({String? messageId}) async {
     final rows = await store.database.rawQuery(
-      'SELECT va.*, m.content AS source_text, m.role AS message_role, '
+      "SELECT va.*, COALESCE(NULLIF(va.generated_text, ''), m.content, '') AS source_text, m.role AS message_role, "
       "COALESCE(c.model_id, '') AS conversation_role_name "
       'FROM voice_assets va '
       'LEFT JOIN messages m ON m.id = va.message_id '
@@ -338,6 +338,27 @@ class VoiceService {
     }
     if (generated.bytes.isEmpty) throw const FormatException('语音接口返回了空音频');
     onProgress?.call('语音已生成，正在保存…');
+    return persistGenerated(
+      messageId: messageId,
+      conversationId: conversationId,
+      text: text,
+      profile: selected,
+      generated: generated,
+      bind: bind,
+      onProgress: onProgress,
+    );
+  }
+
+  Future<VoiceAsset> persistGenerated({
+    required String messageId,
+    required String conversationId,
+    required String text,
+    required VoiceProfile profile,
+    required GeneratedVoice generated,
+    bool bind = true,
+    VoiceGenerationProgress? onProgress,
+  }) async {
+    if (generated.bytes.isEmpty) throw const FormatException('语音接口返回了空音频');
     final id = _uuid.v4();
     final numberRows = await store.database.rawQuery(
       'SELECT COALESCE(MAX(library_number), 0) AS value FROM voice_assets',
@@ -370,10 +391,11 @@ class VoiceService {
         'library_number': number,
         'message_id': messageId,
         'conversation_id': conversationId,
-        'voice_profile_id': selected.id,
-        'provider': selected.provider.key,
-        'model': selected.model,
-        'voice_id': selected.voiceId,
+        'voice_profile_id': profile.id,
+        'provider': profile.provider.key,
+        'model': profile.model,
+        'voice_id': profile.voiceId,
+        'generated_text': text.trim(),
         'relative_path': relativePath,
         'media_type': generated.mediaType,
         'byte_size': generated.bytes.length,

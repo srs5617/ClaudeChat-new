@@ -213,6 +213,20 @@ class _WorkspaceRunState {
   DateTime updatedAt = DateTime.fromMillisecondsSinceEpoch(0);
 }
 
+class _PendingToolVoice {
+  const _PendingToolVoice({
+    required this.callId,
+    required this.text,
+    required this.profile,
+    required this.generated,
+  });
+
+  final String callId;
+  final String text;
+  final VoiceProfile profile;
+  final GeneratedVoice generated;
+}
+
 class AppController extends ChangeNotifier {
   AppController._({
     required this.paths,
@@ -280,7 +294,11 @@ class AppController extends ChangeNotifier {
   final Map<String, String> voiceGenerationStatus = <String, String>{};
   final Map<String, Completer<void>> _voiceGenerationAborts =
       <String, Completer<void>>{};
+  final List<_PendingToolVoice> _pendingToolVoices = <_PendingToolVoice>[];
   String? playingVoiceId;
+  int audioPlaybackPositionMs = 0;
+  int audioPlaybackDurationMs = 0;
+  Timer? _audioPlaybackTimer;
   WorkspaceRecord? activeWorkspace;
   final ValueNotifier<int> workspaceActivity = ValueNotifier<int>(0);
   final ValueNotifier<int> chatActivity = ValueNotifier<int>(0);
@@ -952,6 +970,14 @@ class AppController extends ChangeNotifier {
       .where((value) => value.messageId == messageId && value.bound)
       .firstOrNull;
 
+  String voiceProfileName(VoiceAsset asset) =>
+      voiceProfiles
+          .where((profile) => profile.id == asset.profileId)
+          .map((profile) => profile.name.trim())
+          .where((name) => name.isNotEmpty)
+          .firstOrNull ??
+      VoiceProviderInfo.fromKey(asset.provider).label;
+
   List<VoiceAsset> voicesForMessage(String messageId) => voiceAssets
       .where((value) => value.messageId == messageId)
       .toList(growable: false);
@@ -1542,16 +1568,18 @@ class AppController extends ChangeNotifier {
       if (playingVoiceId == asset.id) {
         await platform.stopAudio();
         playingVoiceId = null;
+        _stopAudioProgress();
       } else {
         if (playingVoiceId != null) await platform.stopAudio();
         await platform.playAudio(
           voice.absolutePath(asset),
           backgroundPlayback: settings['voiceBackgroundPlayback'] == true,
           title: asset.numberLabel,
-          subtitle: asset.model.trim().isEmpty ? asset.provider : asset.model,
+          subtitle: voiceProfileName(asset),
           preview: asset.sourceText,
         );
         playingVoiceId = asset.id;
+        _startAudioProgress();
       }
       notifyListeners();
     } on Object catch (error) {
@@ -1564,6 +1592,59 @@ class AppController extends ChangeNotifier {
   void _audioPlaybackComplete() {
     if (playingVoiceId == null) return;
     playingVoiceId = null;
+    _stopAudioProgress();
+    notifyListeners();
+  }
+
+  void _startAudioProgress() {
+    _audioPlaybackTimer?.cancel();
+    audioPlaybackPositionMs = 0;
+    audioPlaybackDurationMs = 0;
+    _audioPlaybackTimer = Timer.periodic(
+      const Duration(milliseconds: 350),
+      (_) => unawaited(_refreshAudioProgress()),
+    );
+    unawaited(_refreshAudioProgress());
+  }
+
+  void _stopAudioProgress() {
+    _audioPlaybackTimer?.cancel();
+    _audioPlaybackTimer = null;
+    audioPlaybackPositionMs = 0;
+    audioPlaybackDurationMs = 0;
+  }
+
+  Future<void> _refreshAudioProgress() async {
+    if (playingVoiceId == null) return;
+    try {
+      final state = await platform.audioPlaybackState();
+      audioPlaybackPositionMs = state.positionMs;
+      audioPlaybackDurationMs = state.durationMs;
+      if (!state.playing &&
+          state.durationMs > 0 &&
+          state.positionMs >= state.durationMs) {
+        playingVoiceId = null;
+        _stopAudioProgress();
+      }
+      notifyListeners();
+    } on Object {
+      // Older native shells keep basic playback working without seek state.
+    }
+  }
+
+  Future<void> seekVoice(VoiceAsset asset, double progress) async {
+    final value = progress.clamp(0.0, 1.0);
+    if (playingVoiceId != asset.id) {
+      await playVoice(asset);
+      if (playingVoiceId != asset.id) return;
+    }
+    final duration = audioPlaybackDurationMs > 0
+        ? audioPlaybackDurationMs
+        : (asset.durationMs ?? 0);
+    if (duration <= 0) return;
+    final position = (duration * value).round();
+    await platform.seekAudio(position);
+    audioPlaybackPositionMs = position;
     notifyListeners();
   }
 
@@ -1677,6 +1758,7 @@ class AppController extends ChangeNotifier {
     _generationAbort = Completer<void>();
     _generationTimedOut = false;
     notice = null;
+    _pendingToolVoices.clear();
     try {
       final selectedAttachments = <PendingAttachment>[...pendingAttachments];
       pendingAttachments = <PendingAttachment>[];
@@ -1799,6 +1881,10 @@ class AppController extends ChangeNotifier {
           stream: _modelBool('stream', settings['stream'] != false),
           thinkingEnabled: settings['thinking'] != false,
           reasoningEffort: 'max',
+          // Ordinary chats start a fresh reasoning phase for each user turn.
+          // This keeps legacy tool-heavy histories from requiring old local
+          // reasoning to be resent. Workspace requests remain independent.
+          clearHistoricalReasoning: true,
           abortTrigger: _generationAbort!.future,
           tools: settings['toolboxEnabled'] == false
               ? const <Map<String, Object?>>[]
@@ -1885,13 +1971,14 @@ class AppController extends ChangeNotifier {
           completedParts,
         );
       } else {
-        await database.appendMessage(
+        final savedAssistant = await database.appendMessage(
           conversationId: activeConversation!.id,
           role: 'assistant',
           content: streamingText,
           metadataJson: jsonEncode(_completionMetadata(result)),
           parts: completedParts,
         );
+        await _persistPendingToolVoices(savedAssistant);
         messages = await database.messages(activeConversation!.id);
         await _loadMessageParts(activeConversation!.id);
         conversations = await database.conversations();
@@ -1958,6 +2045,7 @@ class AppController extends ChangeNotifier {
       _generationTimeout = null;
       _generationAbort = null;
       _generationTimedOut = false;
+      _pendingToolVoices.clear();
       notifyListeners();
     }
   }
@@ -1979,6 +2067,7 @@ class AppController extends ChangeNotifier {
       'search_diary_entries' => '搜索日记',
       'web_search' => '搜索网络',
       'fetch_url' => '读取网页',
+      'generate_voice' => '说话',
       'list_workspace_files' => '检查工作区文件',
       'read_workspace_file' => '读取工作区文件',
       'list_workspace_file_versions' => '检查工作区文件版本',
@@ -3524,6 +3613,21 @@ class AppController extends ChangeNotifier {
       '_',
     );
     final fileName = '${safeName.isEmpty ? 'workspace' : safeName}.zip';
+    if (Platform.isIOS || Platform.isAndroid) {
+      await paths.temp.create(recursive: true);
+      final output = File(
+        '${paths.temp.path}${Platform.pathSeparator}$fileName',
+      );
+      await output.writeAsBytes(bytes, flush: true);
+      await SharePlus.instance.share(
+        ShareParams(
+          files: <XFile>[XFile(output.path, mimeType: 'application/zip')],
+          fileNameOverrides: <String>[fileName],
+          title: '导出 ${workspace.name}',
+        ),
+      );
+      return output.path;
+    }
     final destination = await getSaveLocation(
       suggestedName: fileName,
       acceptedTypeGroups: const <XTypeGroup>[
@@ -3543,6 +3647,80 @@ class AppController extends ChangeNotifier {
     );
     await package.saveTo(destination.path);
     return destination.path;
+  }
+
+  Future<int> importFilesToActiveWorkspace() async {
+    final workspace = activeWorkspace;
+    if (workspace == null) throw StateError('请先打开一个工作区');
+    final selected = await openFiles(
+      acceptedTypeGroups: const <XTypeGroup>[
+        XTypeGroup(
+          label: '工作区文件或 ZIP 文件包',
+          extensions: <String>[
+            'zip',
+            'html',
+            'htm',
+            'css',
+            'js',
+            'jsx',
+            'ts',
+            'tsx',
+            'json',
+            'md',
+            'txt',
+            'py',
+            'yaml',
+            'yml',
+            'xml',
+            'csv',
+          ],
+        ),
+      ],
+      confirmButtonText: '导入',
+    );
+    if (selected.isEmpty) return 0;
+    final sources = <String, String>{};
+    for (final item in selected) {
+      final bytes = await item.readAsBytes();
+      if (item.name.toLowerCase().endsWith('.zip')) {
+        sources.addAll(WorkspaceExportService.readZip(bytes));
+      } else {
+        sources[WorkspaceExportService.normalizeEntryPath(item.name)] = utf8
+            .decode(bytes, allowMalformed: false);
+      }
+    }
+    if (sources.isEmpty) return 0;
+    final existing = await content.workspaceFiles(workspace.id);
+    for (final entry in sources.entries) {
+      final current = existing
+          .where((file) => file.name == entry.key)
+          .firstOrNull;
+      final extension = entry.key.contains('.')
+          ? entry.key.split('.').last.toLowerCase()
+          : 'text';
+      await content.saveWorkspaceFile(
+        workspaceId: workspace.id,
+        id: current?.id,
+        name: entry.key,
+        type: extension,
+        content: entry.value,
+      );
+    }
+    await content.createWorkspaceCheckpoint(
+      workspace.id,
+      message: '导入 ${sources.length} 个工作区文件',
+      trigger: 'file_import',
+      force: true,
+    );
+    workspaceFiles = await content.workspaceFiles(workspace.id);
+    workspaceFileContents = <String, String>{
+      for (final file in workspaceFiles)
+        file.id: await content.readWorkspaceFile(file),
+    };
+    workspaceFileCounts[workspace.id] = workspaceFiles.length;
+    workspaceCommits = await content.workspaceCommits(workspace.id);
+    notifyListeners();
+    return sources.length;
   }
 
   Future<void> _recordWorkspaceAssistantFailure(
@@ -3800,6 +3978,7 @@ class AppController extends ChangeNotifier {
     busy = true;
     _generationAbort = Completer<void>();
     _generationTimedOut = false;
+    _pendingToolVoices.clear();
     streamingText = '';
     streamingReasoning = '';
     streamingToolProgress = null;
@@ -3882,6 +4061,7 @@ class AppController extends ChangeNotifier {
           stream: _modelBool('stream', settings['stream'] != false),
           thinkingEnabled: settings['thinking'] != false,
           reasoningEffort: 'max',
+          clearHistoricalReasoning: true,
           abortTrigger: _generationAbort!.future,
         );
       }
@@ -3902,13 +4082,14 @@ class AppController extends ChangeNotifier {
           completedParts,
         );
       } else {
-        await database.appendMessage(
+        final savedAssistant = await database.appendMessage(
           conversationId: activeConversation!.id,
           role: 'assistant',
           content: result.text,
           metadataJson: jsonEncode(_completionMetadata(result)),
           parts: completedParts,
         );
+        await _persistPendingToolVoices(savedAssistant);
         messages = await database.messages(activeConversation!.id);
         await _loadMessageParts(activeConversation!.id);
       }
@@ -3948,6 +4129,7 @@ class AppController extends ChangeNotifier {
       streamingReasoning = '';
       streamingParts = <ChatCompletionPart>[];
       streamingToolProgress = null;
+      _pendingToolVoices.clear();
       notifyListeners();
     }
   }
@@ -4060,7 +4242,10 @@ class AppController extends ChangeNotifier {
 
   String _toolboxSystemPrompt() {
     if (privateMode) return '当前是私密对话。你只能使用 get_time 获取当前时间。';
-    return const <String>[
+    final availableVoices = voiceProfiles.isEmpty
+        ? '当前没有已配置的语音接口；不要调用 generate_voice。'
+        : '可用语音接口：${voiceProfiles.map((item) => '${item.name}（profileId=${item.id}）').join('、')}。';
+    return <String>[
       '你可以按需使用内部工具箱。不要为了展示工具而调用工具；只有当工具能明显帮助回答或维护长期上下文时再用。',
       '关键记忆会自动出现在系统上下文中；important、daily、trivial、archived 等其它记忆默认不注入，需要你主动用 search_memory 搜索。',
       '记忆的ID是UUID（形如 a1b2c3d4-... 的长字符串），不是搜索结果列表中的数字序号。对记忆做 update_memory 或 delete_memory 之前，必须先用 search_memory 查出目标记忆的确切UUID，确认内容无误后再操作。绝对不要凭空构造ID。',
@@ -4069,6 +4254,7 @@ class AppController extends ChangeNotifier {
       '编辑文件请用 search_files 获取文件UUID；需要查看完整内容时用 read_file；然后用 edit_file 编辑、delete_file 删除（需提供UUID和删除原因）。',
       '本轮只有收到工具返回的 ok=true 及 result 回执，才算实际执行成功。历史消息里的文件ID、模型自己写出的ID或口头描述都不能证明本轮执行过工具。',
       '用户要求创建、编辑、删除或读取本地数据时，必须真实发起对应工具调用；没有收到本轮工具回执时，禁止声称操作成功。',
+      'generate_voice 会把你要说的内容真正生成语音条并保存进 Ta的声音。仅在用户明确要听语音或语音表达明显更自然时使用，不要每轮都生成。$availableVoices',
     ].join('\n');
   }
 
@@ -4384,6 +4570,9 @@ class AppController extends ChangeNotifier {
         'error': '私密对话只允许使用 get_time',
       });
     }
+    if (request.name == 'generate_voice') {
+      return _generateToolVoice(request);
+    }
     final definition = tools.definition(request.name);
     if (definition?.requiresApproval == true) {
       requestToolApproval(request);
@@ -4444,6 +4633,78 @@ class AppController extends ChangeNotifier {
     });
   }
 
+  Future<String> _generateToolVoice(ToolRequest request) async {
+    final text = '${request.arguments['text'] ?? ''}'.trim();
+    if (text.isEmpty) {
+      return jsonEncode(<String, Object?>{
+        'ok': false,
+        'tool': request.name,
+        'error': '语音内容不能为空',
+      });
+    }
+    final requestedId = '${request.arguments['profileId'] ?? ''}'.trim();
+    final profile = requestedId.isEmpty
+        ? activeVoiceProfile
+        : voiceProfiles.where((item) => item.id == requestedId).firstOrNull;
+    if (profile == null) {
+      return jsonEncode(<String, Object?>{
+        'ok': false,
+        'tool': request.name,
+        'error': requestedId.isEmpty ? '请先配置语音接口' : '指定的语音接口不存在',
+      });
+    }
+    try {
+      final generated = await voice.synthesize(
+        profile: profile,
+        apiKey: await voice.vault.readVoiceApiKey(profile.id) ?? '',
+        text: text,
+        abortTrigger: _generationAbort?.future,
+      );
+      _pendingToolVoices.add(
+        _PendingToolVoice(
+          callId: request.callId,
+          text: text,
+          profile: profile,
+          generated: generated,
+        ),
+      );
+      return jsonEncode(<String, Object?>{
+        'generated': true,
+        'profileId': profile.id,
+        'profileName': profile.name,
+        'text': text,
+      });
+    } on Object catch (error) {
+      return jsonEncode(<String, Object?>{
+        'ok': false,
+        'tool': request.name,
+        'error': '$error',
+      });
+    }
+  }
+
+  Future<void> _persistPendingToolVoices(ChatMessage message) async {
+    if (_pendingToolVoices.isEmpty) return;
+    try {
+      for (var index = 0; index < _pendingToolVoices.length; index++) {
+        final pending = _pendingToolVoices[index];
+        await voice.persistGenerated(
+          messageId: message.id,
+          conversationId: message.conversationId,
+          text: pending.text,
+          profile: pending.profile,
+          generated: pending.generated,
+          bind: index == _pendingToolVoices.length - 1,
+        );
+      }
+      voiceAssets = await voice.assets();
+      notifyListeners();
+    } on Object catch (error) {
+      notice = '语音已经生成，但保存语音条失败：$error';
+      notifyListeners();
+    }
+  }
+
   Future<void> _refreshAfterVerifiedFileWrite(String fileId) async {
     try {
       files = await content.files(includeDeleted: true);
@@ -4499,6 +4760,7 @@ class AppController extends ChangeNotifier {
       'fetch_url' => hasText('url') && decoded.containsKey('content'),
       'set_greeting' => hasText('greeting'),
       'set_splash_phrases' => hasText('phrases'),
+      'generate_voice' => decoded['generated'] == true && hasText('profileId'),
       'create_calendar_event' ||
       'schedule_notification' ||
       'create_system_reminder' => decoded['created'] == true,
@@ -4550,7 +4812,12 @@ class AppController extends ChangeNotifier {
     final items = notifications
         .where((item) => item.approval != null || item.target != null)
         .toList();
-    items.sort((left, right) => left.createdAt.compareTo(right.createdAt));
+    items.sort((left, right) {
+      if (left.isApproval != right.isApproval) {
+        return left.isApproval ? -1 : 1;
+      }
+      return right.createdAt.compareTo(left.createdAt);
+    });
     return List<AppNotice>.unmodifiable(items);
   }
 
@@ -4760,14 +5027,10 @@ class AppController extends ChangeNotifier {
           item,
           ...notifications.where((notice) => notice.id != item.id),
         ].take(20).toList()..sort((left, right) {
-          final leftAction = left.approval != null || left.target != null
-              ? 0
-              : 1;
-          final rightAction = right.approval != null || right.target != null
-              ? 0
-              : 1;
+          final leftAction = left.approval != null ? 0 : 1;
+          final rightAction = right.approval != null ? 0 : 1;
           if (leftAction != rightAction) return leftAction - rightAction;
-          return left.createdAt.compareTo(right.createdAt);
+          return right.createdAt.compareTo(left.createdAt);
         });
   }
 

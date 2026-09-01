@@ -180,6 +180,28 @@ class MainActivity : FlutterActivity() {
                     nativeChannel?.invokeMethod("audioPlaybackComplete", null)
                     result.success(null)
                 }
+                "getAudioPlaybackState" -> {
+                    val state = if (backgroundPlaybackEnabled) {
+                        VoicePlaybackService.playbackState()
+                    } else {
+                        val player = mediaPlayer
+                        mapOf(
+                            "positionMs" to runCatching { player?.currentPosition ?: 0 }.getOrDefault(0),
+                            "durationMs" to runCatching { player?.duration ?: 0 }.getOrDefault(0),
+                            "playing" to runCatching { player?.isPlaying == true }.getOrDefault(false)
+                        )
+                    }
+                    result.success(state)
+                }
+                "seekAudio" -> {
+                    val position = call.argument<Int>("positionMs") ?: 0
+                    if (backgroundPlaybackEnabled) {
+                        VoicePlaybackService.seekTo(position)
+                    } else {
+                        runCatching { mediaPlayer?.seekTo(position.coerceAtLeast(0)) }
+                    }
+                    result.success(null)
+                }
                 else -> result.notImplemented()
             }
         }

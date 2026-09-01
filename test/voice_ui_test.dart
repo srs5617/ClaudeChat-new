@@ -54,7 +54,8 @@ void main() {
     expect(find.text('0012'), findsOneWidget);
     expect(find.text('#0012'), findsNothing);
     expect(find.text('今晚想听你把这段话温柔地读给我听。'), findsWidgets);
-    expect(find.textContaining('eleven_multilingual_v2'), findsOneWidget);
+    expect(find.textContaining('ElevenLabs'), findsOneWidget);
+    expect(find.textContaining('eleven_multilingual_v2'), findsNothing);
     expect(find.textContaining('Sonnet'), findsOneWidget);
     expect(find.byTooltip('只看收藏'), findsOneWidget);
     expect(find.byIcon(Icons.favorite), findsOneWidget);
