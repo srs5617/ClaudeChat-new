@@ -4437,14 +4437,15 @@ class AppController extends ChangeNotifier {
   ) {
     final parts = source[message.id] ?? const <MessagePart>[];
     var total = 0;
-    for (final part in parts.where((part) => part.type == 'tool')) {
-      final arguments = part.metadata['arguments'];
+    for (final part in parts.where(
+      (part) =>
+          part.type == 'tool' &&
+          part.metadata['status'] != 'preparing' &&
+          part.metadata['status'] != 'running',
+    )) {
       total +=
           16 +
-          ContextBudget.estimateText(part.content ?? '') +
-          ContextBudget.estimateText(
-            arguments is String ? arguments : jsonEncode(arguments ?? const {}),
-          );
+          ContextBudget.estimateText(historicalToolContextReceipt(part));
     }
     return total;
   }
@@ -4452,11 +4453,18 @@ class AppController extends ChangeNotifier {
   String _summaryTranscriptMessage(ChatMessage message) {
     final role = message.role == 'user' ? '用户' : '助手';
     final tools = (messagePartsByMessage[message.id] ?? const <MessagePart>[])
-        .where((part) => part.type == 'tool')
+        .where(
+          (part) =>
+              part.type == 'tool' &&
+              part.metadata['status'] != 'preparing' &&
+              part.metadata['status'] != 'running',
+        )
         .map((part) {
           final name = '${part.metadata['name'] ?? 'unknown_tool'}';
           final status = '${part.metadata['status'] ?? 'unknown'}';
-          final compact = (part.content ?? '')
+          final compact = historicalToolContextReceipt(
+            part,
+          )
               .replaceAll(RegExp(r'\s+'), ' ')
               .trim();
           final receipt = compact.length <= 600

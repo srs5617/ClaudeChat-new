@@ -199,7 +199,7 @@ void main() {
     expect(result.parts.first.content, '先检查兼容接口');
   });
 
-  test('rehydrates historical tool calls and receipts in message order', () {
+  test('compacts historical tool calls into one ordered assistant receipt', () {
     final assistant = ChatMessage(
       id: 'assistant-history',
       conversationId: 'conversation',
@@ -258,102 +258,216 @@ void main() {
       messagePartsByMessage: <String, List<MessagePart>>{assistant.id: parts},
     );
 
-    expect(history.map((item) => item['role']), <String>[
-      'user',
-      'assistant',
-      'tool',
-      'assistant',
-    ]);
-    final call = ((history[1]['tool_calls'] as List).single as Map);
-    expect(call['id'], 'call-history-1');
-    expect((call['function'] as Map)['name'], 'search_files');
-    expect(history[2]['tool_call_id'], 'call-history-1');
-    expect(history[2]['content'], contains('file-1'));
-    expect(history[3]['content'], '找到一条。');
+    expect(history.map((item) => item['role']), <String>['user', 'assistant']);
+    final projected = '${history[1]['content']}';
+    expect(projected, contains('我先搜索。'));
+    expect(projected, contains('历史工具回执'));
+    expect(projected, contains('search_files'));
+    expect(projected, contains('测试'));
+    expect(projected, contains('file-1'));
+    expect(projected, contains('找到一条。'));
+    expect(
+      projected.indexOf('我先搜索。'),
+      lessThan(projected.indexOf('search_files')),
+    );
+    expect(
+      projected.indexOf('search_files'),
+      lessThan(projected.indexOf('找到一条。')),
+    );
   });
 
-  test(
-    'sends restored tool history and emits redacted-ready diagnostics',
-    () async {
-      final client = _QueueClient(<String>[
-        jsonEncode(<String, Object?>{
-          'choices': <Object?>[
-            <String, Object?>{
-              'message': <String, Object?>{'content': '继续。'},
-              'finish_reason': 'stop',
-            },
-          ],
-        }),
-      ]);
-      final assistant = ChatMessage(
-        id: 'assistant-history',
-        conversationId: 'conversation',
-        sequence: 2,
-        role: 'assistant',
-        content: '',
-        createdAt: DateTime.utc(2026),
-      );
-      final toolPart = MessagePart(
-        id: 'tool-part',
-        messageId: assistant.id,
-        sequence: 1,
-        type: 'tool',
-        content: '{"matches":[]}',
-        metadataJson: jsonEncode(<String, Object?>{
-          'callId': 'old-call',
-          'name': 'search_files',
-          'arguments': <String, Object?>{'query': '旧窗口'},
-          'status': 'success',
-        }),
-        createdAt: DateTime.utc(2026),
-      );
-      final events = <Map<String, Object?>>[];
-      final api = ApiClient(SecureVault(), client: client);
-
-      await api.chatWithTools(
-        profile: _profile,
-        model: 'test-model',
-        messages: <ChatMessage>[_message, assistant],
-        messagePartsByMessage: <String, List<MessagePart>>{
-          assistant.id: <MessagePart>[toolPart],
+  test('omits historical file bodies while preserving verified receipt', () {
+    final assistant = ChatMessage(
+      id: 'assistant-file-history',
+      conversationId: 'conversation',
+      sequence: 2,
+      role: 'assistant',
+      content: '文件已经创建。',
+      createdAt: DateTime.utc(2026),
+    );
+    final toolPart = MessagePart(
+      id: 'tool-file-history',
+      messageId: assistant.id,
+      sequence: 1,
+      type: 'tool',
+      content: jsonEncode(<String, Object?>{
+        'id': 'file-1',
+        'versionId': 'version-1',
+        'name': 'demo.html',
+        'verified': true,
+        'sha256': 'abc123',
+        'byteSize': 90000,
+      }),
+      metadataJson: jsonEncode(<String, Object?>{
+        'callId': 'old-file-call',
+        'name': 'create_file',
+        'arguments': <String, Object?>{
+          'name': 'demo.html',
+          'type': 'html',
+          'content': 'TOP_SECRET_FULL_FILE_BODY',
         },
-        systemPrompt: '',
-        tools: const <Map<String, Object?>>[
+        'status': 'success',
+      }),
+      createdAt: DateTime.utc(2026),
+    );
+
+    final history = buildToolAwareApiMessages(
+      messages: <ChatMessage>[_message, assistant],
+      messagePartsByMessage: <String, List<MessagePart>>{
+        assistant.id: <MessagePart>[toolPart],
+      },
+    );
+
+    final encoded = jsonEncode(history);
+    expect(encoded, isNot(contains('TOP_SECRET_FULL_FILE_BODY')));
+    expect(encoded, contains('demo.html'));
+    expect(encoded, contains('file-1'));
+    expect(encoded, contains('version-1'));
+    expect(encoded, contains('abc123'));
+    expect(encoded, contains('文件已经创建。'));
+    expect(history.where((item) => item['role'] == 'tool'), isEmpty);
+    expect(history.where((item) => item['tool_calls'] != null), isEmpty);
+  });
+
+  test('keeps only the latest historical workspace plan snapshot', () {
+    final assistant = ChatMessage(
+      id: 'assistant-plan-history',
+      conversationId: 'workspace-conversation',
+      sequence: 2,
+      role: 'assistant',
+      content: '计划执行完成。',
+      createdAt: DateTime.utc(2026),
+    );
+    MessagePart planPart(int sequence, String title, String state) =>
+        MessagePart(
+          id: 'plan-$sequence',
+          messageId: assistant.id,
+          sequence: sequence,
+          type: 'tool',
+          content: '{"updated":true}',
+          metadataJson: jsonEncode(<String, Object?>{
+            'name': 'update_workspace_plan',
+            'arguments': <String, Object?>{
+              'items': <Object?>[
+                <String, Object?>{
+                  'id': 'step-1',
+                  'title': title,
+                  'state': state,
+                },
+              ],
+            },
+            'status': 'success',
+          }),
+          createdAt: DateTime.utc(2026),
+        );
+
+    final history = buildToolAwareApiMessages(
+      messages: <ChatMessage>[_message, assistant],
+      messagePartsByMessage: <String, List<MessagePart>>{
+        assistant.id: <MessagePart>[
+          planPart(1, '旧计划步骤', 'running'),
+          planPart(2, '最终计划步骤', 'completed'),
+        ],
+      },
+    );
+
+    final encoded = jsonEncode(history);
+    expect(encoded, isNot(contains('旧计划步骤')));
+    expect(encoded, contains('最终计划步骤'));
+    expect(encoded, contains('completed'));
+    expect(encoded, contains('计划执行完成。'));
+  });
+
+  test('sends compact tool history and emits size diagnostics', () async {
+    final client = _QueueClient(<String>[
+      jsonEncode(<String, Object?>{
+        'choices': <Object?>[
           <String, Object?>{
-            'type': 'function',
-            'function': <String, Object?>{'name': 'search_files'},
+            'message': <String, Object?>{'content': '继续。'},
+            'finish_reason': 'stop',
           },
         ],
-        executeTool: (_, _, _) async => '{}',
-        stream: false,
-        diagnosticContext: const <String, Object?>{'requestId': 'request-1'},
-        onDiagnostic: events.add,
-      );
+      }),
+    ]);
+    final assistant = ChatMessage(
+      id: 'assistant-history',
+      conversationId: 'conversation',
+      sequence: 2,
+      role: 'assistant',
+      content: '',
+      createdAt: DateTime.utc(2026),
+    );
+    final toolPart = MessagePart(
+      id: 'tool-part',
+      messageId: assistant.id,
+      sequence: 1,
+      type: 'tool',
+      content: '{"matches":[]}',
+      metadataJson: jsonEncode(<String, Object?>{
+        'callId': 'old-call',
+        'name': 'search_files',
+        'arguments': <String, Object?>{'query': '旧窗口'},
+        'status': 'success',
+      }),
+      createdAt: DateTime.utc(2026),
+    );
+    final events = <Map<String, Object?>>[];
+    final api = ApiClient(SecureVault(), client: client);
 
-      final payload = jsonDecode(client.requests.single) as Map;
-      final apiMessages = payload['messages'] as List;
-      expect(
-        apiMessages.any((item) => (item as Map)['tool_calls'] != null),
-        isTrue,
-      );
-      expect(
-        apiMessages.any((item) => (item as Map)['role'] == 'tool'),
-        isTrue,
-      );
-      expect(
-        events
-            .where((event) => event['event'] == 'chat_request_started')
-            .single['restoredHistoricalToolCalls'],
-        1,
-      );
-      expect(
-        events
-            .where((event) => event['event'] == 'model_round_completed')
-            .single['toolCallCount'],
-        0,
-      );
-    },
-  );
+    await api.chatWithTools(
+      profile: _profile,
+      model: 'test-model',
+      messages: <ChatMessage>[_message, assistant],
+      messagePartsByMessage: <String, List<MessagePart>>{
+        assistant.id: <MessagePart>[toolPart],
+      },
+      systemPrompt: '',
+      tools: const <Map<String, Object?>>[
+        <String, Object?>{
+          'type': 'function',
+          'function': <String, Object?>{'name': 'search_files'},
+        },
+      ],
+      executeTool: (_, _, _) async => '{}',
+      stream: false,
+      diagnosticContext: const <String, Object?>{'requestId': 'request-1'},
+      onDiagnostic: events.add,
+    );
+
+    final payload = jsonDecode(client.requests.single) as Map;
+    final apiMessages = payload['messages'] as List;
+    expect(
+      apiMessages.any((item) => (item as Map)['tool_calls'] != null),
+      isFalse,
+    );
+    expect(apiMessages.any((item) => (item as Map)['role'] == 'tool'), isFalse);
+    expect(jsonEncode(apiMessages), contains('历史工具回执'));
+    expect(jsonEncode(apiMessages), contains('旧窗口'));
+    expect(
+      events
+          .where((event) => event['event'] == 'chat_request_started')
+          .single['restoredHistoricalToolCalls'],
+      0,
+    );
+    expect(
+      events
+          .where((event) => event['event'] == 'chat_request_started')
+          .single['compactedHistoricalToolReceipts'],
+      1,
+    );
+    expect(
+      events
+          .where((event) => event['event'] == 'chat_request_started')
+          .single['historicalToolRawBytes'],
+      greaterThan(0),
+    );
+    expect(
+      events
+          .where((event) => event['event'] == 'model_round_completed')
+          .single['toolCallCount'],
+      0,
+    );
+  });
 
   test(
     'extracts nonstandard usage containers returned by compatible APIs',

@@ -13,14 +13,416 @@ typedef DiagnosticSink = void Function(Map<String, Object?> event);
 typedef _RoundDiagnosticSink =
     void Function(String event, Map<String, Object?> values);
 
-/// Rehydrates durable message parts into the structured tool history expected
-/// by OpenAI-compatible chat APIs.
+const _historicalToolReceiptLabel = '【历史工具回执（已于先前轮次执行，不代表本轮重新执行）】';
+
+bool _isDurableToolPart(MessagePart part) =>
+    part.type == 'tool' &&
+    part.metadata['status'] != 'preparing' &&
+    part.metadata['status'] != 'running';
+
+Map<String, Object?> _historyMap(Object? value) {
+  Object? decoded = value;
+  if (value is String) {
+    try {
+      decoded = jsonDecode(value);
+    } on FormatException {
+      return <String, Object?>{};
+    }
+  }
+  if (decoded is! Map) return <String, Object?>{};
+  return decoded.map((key, nested) => MapEntry('$key', nested));
+}
+
+Object? _historyDecoded(Object? value) {
+  if (value is! String) return value;
+  try {
+    return jsonDecode(value);
+  } on FormatException {
+    return value;
+  }
+}
+
+String _historySnippet(Object? value, [int limit = 240]) {
+  final text = '${value ?? ''}'.replaceAll(RegExp(r'\s+'), ' ').trim();
+  if (text.length <= limit) return text;
+  return '${text.substring(0, limit)}…';
+}
+
+void _copyHistoryFields(
+  Map<String, Object?> target,
+  Map<String, Object?> source,
+  Iterable<String> keys,
+) {
+  for (final key in keys) {
+    final value = source[key];
+    if (value == null || value is String && value.trim().isEmpty) continue;
+    target[key] = value;
+  }
+}
+
+Object? _boundedHistoryValue(Object? value, {int depth = 0}) {
+  if (value == null || value is num || value is bool) return value;
+  if (value is String) return _historySnippet(value);
+  if (depth >= 3) return '[details omitted]';
+  if (value is List) {
+    return value
+        .take(8)
+        .map((item) => _boundedHistoryValue(item, depth: depth + 1))
+        .toList();
+  }
+  if (value is Map) {
+    final output = <String, Object?>{};
+    for (final entry in value.entries.take(16)) {
+      final key = '${entry.key}';
+      if (const <String>{
+        'content',
+        'body',
+        'html',
+        'markdown',
+        'raw',
+      }.contains(key.toLowerCase())) {
+        continue;
+      }
+      output[key] = _boundedHistoryValue(entry.value, depth: depth + 1);
+    }
+    return output;
+  }
+  return _historySnippet(value);
+}
+
+List<Object?> _compactHistoryItems(Object? value) {
+  if (value is! List) return const <Object?>[];
+  return value.take(12).map((item) {
+    final source = _historyMap(item);
+    if (source.isEmpty) return _boundedHistoryValue(item);
+    final output = <String, Object?>{};
+    _copyHistoryFields(output, source, const <String>[
+      'id',
+      'fileId',
+      'versionId',
+      'name',
+      'title',
+      'type',
+      'status',
+      'level',
+      'tags',
+      'url',
+      'action',
+      'verified',
+      'sha256',
+      'size',
+      'bytes',
+      'byteSize',
+      'versionCount',
+      'updatedAt',
+      'createdAt',
+    ]);
+    final excerpt =
+        source['preview'] ??
+        source['snippet'] ??
+        source['description'] ??
+        source['content'];
+    final compact = _historySnippet(excerpt, 180);
+    if (compact.isNotEmpty) output['excerpt'] = compact;
+    return output;
+  }).toList();
+}
+
+Map<String, Object?> _compactHistoricalToolReceipt(MessagePart part) {
+  final metadata = part.metadata;
+  final name = '${metadata['name'] ?? 'unknown_tool'}'.trim();
+  final status = '${metadata['status'] ?? 'unknown'}'.trim();
+  final arguments = _historyMap(metadata['arguments']);
+  final decodedResult = _historyDecoded(part.content ?? '');
+  final result = _historyMap(decodedResult);
+  final receipt = <String, Object?>{'tool': name, 'status': status};
+
+  if (status != 'success') {
+    receipt['arguments'] = _boundedHistoryValue(arguments);
+    receipt['result'] = _boundedHistoryValue(decodedResult);
+    return receipt;
+  }
+
+  final compactArguments = <String, Object?>{};
+  final compactResult = <String, Object?>{};
+  switch (name) {
+    case 'get_time':
+      _copyHistoryFields(compactResult, result, const <String>[
+        'iso',
+        'local',
+        'timeZone',
+        'period',
+      ]);
+      break;
+    case 'create_file':
+    case 'edit_file':
+    case 'delete_file':
+    case 'create_workspace_file':
+    case 'edit_workspace_file':
+    case 'restore_workspace_file_version':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'id',
+        'fileId',
+        'versionId',
+        'name',
+        'fileName',
+        'path',
+        'type',
+        'reason',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'id',
+        'fileId',
+        'versionId',
+        'restoredVersionId',
+        'name',
+        'type',
+        'action',
+        'verified',
+        'sha256',
+        'size',
+        'bytes',
+        'byteSize',
+        'versionCount',
+        'updatedAt',
+      ]);
+      break;
+    case 'read_file':
+    case 'read_workspace_file':
+    case 'read_workspace_file_version':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'id',
+        'fileId',
+        'versionId',
+        'name',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'id',
+        'fileId',
+        'versionId',
+        'name',
+        'type',
+        'verified',
+        'sha256',
+        'size',
+        'bytes',
+        'byteSize',
+        'updatedAt',
+      ]);
+      final content = '${result['content'] ?? ''}';
+      if (content.isNotEmpty) {
+        compactResult['contentExcerpt'] = _historySnippet(content, 600);
+        compactResult['contentOmitted'] = content.length > 600;
+      }
+      if (result['version'] != null) {
+        compactResult['version'] = _boundedHistoryValue(result['version']);
+      }
+      break;
+    case 'search_files':
+    case 'list_workspace_files':
+    case 'list_workspace_file_versions':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'query',
+        'limit',
+        'name',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'query',
+        'total',
+        'name',
+      ]);
+      compactResult['items'] = _compactHistoryItems(
+        result['matches'] ?? result['files'] ?? result['versions'],
+      );
+      break;
+    case 'create_memory':
+    case 'update_memory':
+    case 'delete_memory':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'id',
+        'level',
+        'tags',
+        'reason',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'id',
+        'level',
+        'tags',
+        'status',
+        'deletedAt',
+        'deleteReason',
+        'updatedAt',
+      ]);
+      final memory = _historySnippet(result['content'], 320);
+      if (memory.isNotEmpty) compactResult['content'] = memory;
+      break;
+    case 'search_memory':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'query',
+        'levels',
+        'tags',
+        'limit',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>['total']);
+      compactResult['matches'] = _compactHistoryItems(result['matches']);
+      break;
+    case 'create_diary_entry':
+    case 'revise_diary_entry':
+    case 'request_delete_diary_entry':
+    case 'delete_diary_entry':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'id',
+        'title',
+        'mood',
+        'tags',
+        'reason',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'id',
+        'title',
+        'status',
+        'latestVersionId',
+        'mood',
+        'tags',
+        'updatedAt',
+        'deletedAt',
+      ]);
+      final preview = _historySnippet(
+        result['preview'] ?? result['content'],
+        320,
+      );
+      if (preview.isNotEmpty) compactResult['excerpt'] = preview;
+      break;
+    case 'search_diary_entries':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'query',
+        'status',
+        'tags',
+        'limit',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>['total']);
+      compactResult['matches'] = _compactHistoryItems(result['matches']);
+      break;
+    case 'read_diary_entry':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'id',
+        'includeVersions',
+      ]);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'id',
+        'title',
+        'status',
+        'latestVersionId',
+        'latestReason',
+        'mood',
+        'tags',
+        'updatedAt',
+      ]);
+      final content = '${result['content'] ?? ''}';
+      if (content.isNotEmpty) {
+        compactResult['contentExcerpt'] = _historySnippet(content, 600);
+        compactResult['contentOmitted'] = content.length > 600;
+      }
+      compactResult['versions'] = _compactHistoryItems(result['versions']);
+      break;
+    case 'web_search':
+      _copyHistoryFields(compactArguments, arguments, const <String>['query']);
+      _copyHistoryFields(compactResult, result, const <String>['query']);
+      compactResult['results'] = _compactHistoryItems(result['results']);
+      break;
+    case 'fetch_url':
+      _copyHistoryFields(compactArguments, arguments, const <String>['url']);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'url',
+        'title',
+        'status',
+      ]);
+      final content = _historySnippet(
+        result['content'] ?? result['text'] ?? result['body'],
+        800,
+      );
+      if (content.isNotEmpty) compactResult['contentExcerpt'] = content;
+      break;
+    case 'update_workspace_plan':
+      compactArguments['items'] = _boundedHistoryValue(arguments['items']);
+      _copyHistoryFields(compactResult, result, const <String>[
+        'updated',
+        'workspaceId',
+      ]);
+      if (result['items'] != null) {
+        compactResult['items'] = _boundedHistoryValue(result['items']);
+      }
+      break;
+    case 'generate_voice':
+      _copyHistoryFields(compactArguments, arguments, const <String>[
+        'profileId',
+        'voiceProfileId',
+      ]);
+      final spoken = _historySnippet(
+        arguments['text'] ?? arguments['content'],
+        240,
+      );
+      if (spoken.isNotEmpty) compactArguments['text'] = spoken;
+      _copyHistoryFields(compactResult, result, const <String>[
+        'id',
+        'voiceId',
+        'profileId',
+        'durationMs',
+        'byteSize',
+        'sha256',
+      ]);
+      break;
+    default:
+      for (final key in const <String>[
+        'id',
+        'title',
+        'start',
+        'end',
+        'due',
+        'scheduled_at',
+        'scheduledAt',
+        'name',
+        'reason',
+      ]) {
+        if (arguments.containsKey(key)) {
+          compactArguments[key] = _boundedHistoryValue(arguments[key]);
+        }
+      }
+      final bounded = _boundedHistoryValue(decodedResult);
+      if (bounded is Map) {
+        compactResult.addAll(
+          bounded.map((key, value) => MapEntry('$key', value)),
+        );
+      } else if (bounded != null) {
+        compactResult['value'] = bounded;
+      }
+  }
+
+  if (compactArguments.isNotEmpty) receipt['arguments'] = compactArguments;
+  if (compactResult.isNotEmpty) receipt['result'] = compactResult;
+  return receipt;
+}
+
+/// Returns the bounded, cross-turn representation of one durable tool event.
+/// The local [MessagePart] remains unchanged and keeps the full audit record.
+String historicalToolContextReceipt(MessagePart part) =>
+    '$_historicalToolReceiptLabel ${jsonEncode(_compactHistoricalToolReceipt(part))}';
+
+void _appendHistoricalContextSegment(StringBuffer target, String value) {
+  final text = value.trim();
+  if (text.isEmpty) return;
+  if (target.isNotEmpty) target.write('\n\n');
+  target.write(text);
+}
+
+/// Projects durable message parts into compact cross-turn context.
 ///
-/// A ClaudeChat assistant message can contain several model/tool rounds. The
-/// database keeps those rounds as ordered parts, so replaying only
-/// `role + content` makes a long conversation look as if the model merely
-/// claimed to use tools. This builder restores each assistant tool call and
-/// its matching `role: tool` receipt.
+/// Full arguments and results remain in the local database and are still sent
+/// unchanged between model rounds while a tool is actively running. Once that
+/// turn has completed, replaying large file bodies, fetched pages, or every
+/// protocol message adds substantial cost without improving continuity. The
+/// next user turn therefore receives one assistant message with compact,
+/// machine-generated receipts and the original visible response.
 @visibleForTesting
 List<Map<String, Object?>> buildToolAwareApiMessages({
   required List<ChatMessage> messages,
@@ -44,14 +446,7 @@ List<Map<String, Object?>> buildToolAwareApiMessages({
     }
 
     final parts = messagePartsByMessage[message.id] ?? const <MessagePart>[];
-    final toolParts = parts
-        .where(
-          (part) =>
-              part.type == 'tool' &&
-              part.metadata['status'] != 'preparing' &&
-              part.metadata['status'] != 'running',
-        )
-        .toList();
+    final toolParts = parts.where(_isDurableToolPart).toList();
     if (toolParts.isEmpty) {
       output.add(<String, Object?>{
         'role': 'assistant',
@@ -63,75 +458,47 @@ List<Map<String, Object?>> buildToolAwareApiMessages({
     final hasContentPart = parts.any(
       (part) => part.type == 'content' && (part.content ?? '').isNotEmpty,
     );
-    var pendingText = StringBuffer();
-    if (!hasContentPart && message.content.isNotEmpty) {
-      pendingText.write(message.content);
-    }
-    var partIndex = 0;
-    while (partIndex < parts.length) {
-      final part = parts[partIndex];
-      if (part.type == 'content') {
-        pendingText.write(part.content ?? '');
-        partIndex++;
-        continue;
-      }
-      if (part.type != 'tool' ||
-          part.metadata['status'] == 'preparing' ||
-          part.metadata['status'] == 'running') {
-        partIndex++;
-        continue;
-      }
-
-      final group = <MessagePart>[];
-      while (partIndex < parts.length) {
-        final candidate = parts[partIndex];
-        if (candidate.type != 'tool') break;
-        if (candidate.metadata['status'] != 'preparing' &&
-            candidate.metadata['status'] != 'running') {
-          group.add(candidate);
+    final context = StringBuffer();
+    final latestPlanSequence = toolParts
+        .where((part) => part.metadata['name'] == 'update_workspace_plan')
+        .map((part) => part.sequence)
+        .fold<int>(
+          -1,
+          (latest, sequence) => sequence > latest ? sequence : latest,
+        );
+    if (!hasContentPart) {
+      for (final part in toolParts) {
+        if (part.metadata['name'] == 'update_workspace_plan' &&
+            part.sequence != latestPlanSequence) {
+          continue;
         }
-        partIndex++;
+        _appendHistoricalContextSegment(
+          context,
+          historicalToolContextReceipt(part),
+        );
       }
-      final calls = <Map<String, Object?>>[];
-      final receipts = <Map<String, Object?>>[];
-      for (final tool in group) {
-        final metadata = tool.metadata;
-        final name = '${metadata['name'] ?? ''}'.trim();
-        if (name.isEmpty) continue;
-        final callId = '${metadata['callId'] ?? ''}'.trim().isEmpty
-            ? 'history-${message.id}-${tool.sequence}'
-            : '${metadata['callId']}';
-        final rawArguments = metadata['arguments'];
-        final arguments = rawArguments is String
-            ? rawArguments
-            : jsonEncode(rawArguments is Map ? rawArguments : const {});
-        calls.add(<String, Object?>{
-          'id': callId,
-          'type': 'function',
-          'function': <String, Object?>{'name': name, 'arguments': arguments},
-        });
-        receipts.add(<String, Object?>{
-          'role': 'tool',
-          'tool_call_id': callId,
-          'name': name,
-          'content': (tool.content ?? '').isEmpty ? '{}' : tool.content,
-        });
+      _appendHistoricalContextSegment(context, message.content);
+    } else {
+      for (final part in parts) {
+        if (part.type == 'content') {
+          _appendHistoricalContextSegment(context, part.content ?? '');
+          continue;
+        }
+        if (!_isDurableToolPart(part) ||
+            part.metadata['name'] == 'update_workspace_plan' &&
+                part.sequence != latestPlanSequence) {
+          continue;
+        }
+        _appendHistoricalContextSegment(
+          context,
+          historicalToolContextReceipt(part),
+        );
       }
-      if (calls.isEmpty) continue;
-      output.add(<String, Object?>{
-        'role': 'assistant',
-        'content': pendingText.toString(),
-        'tool_calls': calls,
-      });
-      output.addAll(receipts);
-      pendingText = StringBuffer();
     }
-    if (pendingText.isNotEmpty) {
-      output.add(<String, Object?>{
-        'role': 'assistant',
-        'content': pendingText.toString(),
-      });
-    }
+    output.add(<String, Object?>{
+      'role': 'assistant',
+      'content': context.toString(),
+    });
   }
   return output;
 }
@@ -306,20 +673,7 @@ class ApiClient {
       effort: reasoningEffort,
       clearHistoricalReasoning: clearHistoricalReasoning,
     );
-    final plainHistory = messages.indexed
-        .map(
-          (entry) => <String, Object?>{
-            'role': entry.$2.role,
-            'content':
-                entry.$1 == messages.length - 1 &&
-                    entry.$2.role == 'user' &&
-                    lastUserContent != null
-                ? lastUserContent['content']
-                : entry.$2.content,
-          },
-        )
-        .toList(growable: false);
-    final structuredHistory = buildToolAwareApiMessages(
+    final projectedHistory = buildToolAwareApiMessages(
       messages: messages,
       messagePartsByMessage: messagePartsByMessage,
       lastUserContent: lastUserContent,
@@ -327,7 +681,7 @@ class ApiClient {
     final apiMessages = <Map<String, Object?>>[
       if (systemPrompt.trim().isNotEmpty)
         <String, Object?>{'role': 'system', 'content': systemPrompt.trim()},
-      ...(tools.isEmpty ? plainHistory : structuredHistory),
+      ...projectedHistory,
     ];
     void emit(String event, [Map<String, Object?> values = const {}]) {
       onDiagnostic?.call(<String, Object?>{
@@ -342,6 +696,27 @@ class ApiClient {
       (total, message) =>
           total + ((message['tool_calls'] as List?)?.length ?? 0),
     );
+    final compactedHistoricalToolReceipts = messages.fold<int>(
+      0,
+      (total, message) =>
+          total +
+          (messagePartsByMessage[message.id] ?? const <MessagePart>[])
+              .where(_isDurableToolPart)
+              .length,
+    );
+    final historicalToolRawBytes = messages.fold<int>(0, (total, message) {
+      final parts = messagePartsByMessage[message.id] ?? const <MessagePart>[];
+      return total +
+          parts.where(_isDurableToolPart).fold<int>(0, (partTotal, part) {
+            final arguments = part.metadata['arguments'];
+            final encodedArguments = arguments is String
+                ? arguments
+                : jsonEncode(arguments ?? const <String, Object?>{});
+            return partTotal +
+                utf8.encode(encodedArguments).length +
+                utf8.encode(part.content ?? '').length;
+          });
+    });
     emit('chat_request_started', <String, Object?>{
       'model': model,
       'endpointHost': endpoint.host,
@@ -349,6 +724,9 @@ class ApiClient {
       'storedMessageCount': messages.length,
       'apiMessageCount': apiMessages.length,
       'restoredHistoricalToolCalls': restoredToolCalls,
+      'compactedHistoricalToolReceipts': compactedHistoricalToolReceipts,
+      'historicalToolRawBytes': historicalToolRawBytes,
+      'projectedHistoryBytes': utf8.encode(jsonEncode(projectedHistory)).length,
       'toolDefinitionCount': tools.length,
       'toolNames': tools
           .map((tool) => '${(tool['function'] as Map?)?['name'] ?? ''}')
@@ -427,7 +805,7 @@ class ApiClient {
               'role': 'system',
               'content': systemPromptWithoutTools!.trim(),
             },
-          ...plainHistory,
+          ...projectedHistory,
         ];
         final fallback = await _completionRoundWithCompat(
           endpoint: endpoint,
