@@ -55,7 +55,7 @@ class _CapturingClient extends http.BaseClient {
 
 void main() {
   test('voice schema is versioned and exported for merge backups', () {
-    expect(databaseVersion, 6);
+    expect(databaseVersion, 7);
     expect(
       exportedTables,
       containsAll(<String>['voice_profiles', 'voice_assets']),
@@ -67,6 +67,8 @@ void main() {
         contains('library_number'),
         contains('is_bound'),
         contains('generated_text'),
+        contains('source_kind'),
+        contains('tool_call_id'),
       ),
     );
   });

@@ -145,7 +145,12 @@ void main() {
     await tester.pump();
 
     expect(find.text('思维链'), findsWidgets);
-    await tester.tap(find.text('思维链').last);
+    final streamingThought = find.descendant(
+      of: find.byKey(const Key('message-stream')),
+      matching: find.text('思维链'),
+    );
+    expect(streamingThought, findsOneWidget);
+    await tester.tap(streamingThought);
     await tester.pump();
     expect(find.text('普通聊天正在流式输出的思维链'), findsOneWidget);
   });

@@ -165,12 +165,6 @@ void main() {
     );
     expect(tester.getSize(find.byTooltip('重编')).width, 30);
 
-    await tester.longPress(userMessage);
-    await tester.pump();
-    expect(find.byTooltip('编辑并重发'), findsNothing);
-
-    await tester.longPress(userMessage);
-    await tester.pump();
     await tester.tap(find.byTooltip('编辑并重发'));
     await tester.pump();
 

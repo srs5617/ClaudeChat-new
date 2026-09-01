@@ -61,6 +61,26 @@ void main() {
     expect(executed, isEmpty);
   });
 
+  test(
+    'voice source repair separates tool assets without deleting data',
+    () async {
+      final executed = <String>[];
+
+      await ensureVoiceAssetSourceSchema(
+        execute: (sql) async => executed.add(sql),
+        rawQuery: (_) async => <Map<String, Object?>>[
+          <String, Object?>{'name': 'id'},
+          <String, Object?>{'name': 'generated_text'},
+        ],
+      );
+
+      expect(executed, contains(contains('ADD COLUMN source_kind')));
+      expect(executed, contains(contains('ADD COLUMN tool_call_id')));
+      expect(executed, contains(contains("SET source_kind = 'tool'")));
+      expect(executed, contains(contains('idx_voice_assets_source')));
+    },
+  );
+
   test('conversation archive repair only adds a missing column', () async {
     final executed = <String>[];
 

@@ -231,6 +231,7 @@ void main() {
       var list = tester.widget<ListView>(
         find.byKey(const Key('chat-message-list')),
       );
+      expect(list.reverse, isTrue);
       expect(list.controller!.position.maxScrollExtent, greaterThan(400));
       list.controller!.jumpTo(286);
       await tester.pump();
@@ -255,7 +256,7 @@ void main() {
       );
       expect(
         list.controller!.offset,
-        closeTo(list.controller!.position.maxScrollExtent, .5),
+        closeTo(list.controller!.position.minScrollExtent, .5),
       );
     },
   );

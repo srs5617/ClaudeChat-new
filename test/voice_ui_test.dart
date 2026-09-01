@@ -1,9 +1,65 @@
 import 'package:claudechat/app.dart';
 import 'package:claudechat/app_controller.dart';
+import 'package:claudechat/services/voice_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('tool voice and whole-message voice selectors stay independent', () {
+    final controller = AppController.visualAudit(
+      initialSection: AppSection.chat,
+      scenario: 'chat-rich',
+    );
+    final timestamp = DateTime.utc(2026, 8, 19, 12);
+    VoiceAsset asset({
+      required String id,
+      required String sourceKind,
+      String toolCallId = '',
+      String sourceText = '',
+    }) => VoiceAsset(
+      id: id,
+      libraryNumber: id == 'message-voice' ? 1 : 2,
+      messageId: 'visual-audit-assistant',
+      conversationId: 'visual-audit-chat',
+      profileId: null,
+      provider: 'custom',
+      model: 'visual-audit',
+      voiceId: 'visual-audit',
+      relativePath: '$id.mp3',
+      mediaType: 'audio/mpeg',
+      byteSize: 128,
+      sha256: id,
+      favorite: false,
+      bound: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      sourceKind: sourceKind,
+      toolCallId: toolCallId,
+      sourceText: sourceText,
+    );
+    final messageVoice = asset(id: 'message-voice', sourceKind: 'message');
+    final toolVoice = asset(
+      id: 'tool-voice',
+      sourceKind: 'tool',
+      toolCallId: 'call-1',
+      sourceText: '小机子自己说的话',
+    );
+    controller.voiceAssets = <VoiceAsset>[toolVoice, messageVoice];
+
+    expect(controller.voiceForMessage('visual-audit-assistant'), messageVoice);
+    expect(controller.voicesForMessage('visual-audit-assistant'), <VoiceAsset>[
+      messageVoice,
+    ]);
+    expect(
+      controller.toolVoiceForCall(
+        'visual-audit-assistant',
+        'call-1',
+        text: '小机子自己说的话',
+      ),
+      toolVoice,
+    );
+  });
+
   testWidgets('message voice action is a compact play control', (tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(1200, 1800);
@@ -69,6 +125,48 @@ void main() {
     expect(find.text('声音 #0012'), findsNothing);
     expect(find.byTooltip('返回上级'), findsOneWidget);
     expect(find.byIcon(Icons.play_arrow_rounded), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('bound message voice uses the waveform scrubber', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1200, 1800);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = AppController.visualAudit(
+      initialSection: AppSection.chat,
+      scenario: 'chat-rich',
+    );
+    final timestamp = DateTime.utc(2026, 8, 19, 12);
+    controller.voiceAssets = <VoiceAsset>[
+      VoiceAsset(
+        id: 'message-waveform-voice',
+        libraryNumber: 13,
+        messageId: 'visual-audit-assistant',
+        conversationId: 'visual-audit-chat',
+        profileId: null,
+        provider: 'custom',
+        model: 'visual-audit',
+        voiceId: 'visual-audit',
+        relativePath: 'visual-audit.mp3',
+        mediaType: 'audio/mpeg',
+        byteSize: 128,
+        sha256: 'visual-audit',
+        durationMs: 11000,
+        favorite: false,
+        bound: true,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      ),
+    ];
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('message-voice-waveform')), findsOneWidget);
+    expect(find.byType(Slider), findsNothing);
     expect(tester.takeException(), isNull);
   });
 }

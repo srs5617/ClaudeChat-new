@@ -1,4 +1,4 @@
-const int databaseVersion = 6;
+const int databaseVersion = 7;
 
 const List<String> workspaceConversationSchemaStatements = <String>[
   '''CREATE TABLE IF NOT EXISTS workspace_conversations (
@@ -87,6 +87,9 @@ const List<String> voiceSchemaStatements = <String>[
     provider TEXT NOT NULL,
     model TEXT NOT NULL DEFAULT '',
     voice_id TEXT NOT NULL DEFAULT '',
+    generated_text TEXT NOT NULL DEFAULT '',
+    source_kind TEXT NOT NULL DEFAULT 'message',
+    tool_call_id TEXT NOT NULL DEFAULT '',
     relative_path TEXT NOT NULL,
     media_type TEXT NOT NULL DEFAULT 'audio/mpeg',
     byte_size INTEGER NOT NULL,

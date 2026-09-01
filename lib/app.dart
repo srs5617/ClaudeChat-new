@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -385,27 +384,7 @@ class _AppShellState extends State<AppShell> {
   bool drawerOpen = false;
 
   @override
-  void initState() {
-    super.initState();
-    widget.controller.chatActivity.addListener(_onChatActivity);
-  }
-
-  void _onChatActivity() {
-    if (!mounted || widget.controller.section != AppSection.chat) return;
-    setState(() {});
-  }
-
-  @override
-  void didUpdateWidget(covariant AppShell oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.controller == widget.controller) return;
-    oldWidget.controller.chatActivity.removeListener(_onChatActivity);
-    widget.controller.chatActivity.addListener(_onChatActivity);
-  }
-
-  @override
   void dispose() {
-    widget.controller.chatActivity.removeListener(_onChatActivity);
     composer.dispose();
     super.dispose();
   }
@@ -1921,20 +1900,15 @@ class _ScrollEdgeFade extends StatelessWidget {
           top: 0,
           height: 9,
           child: IgnorePointer(
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 5.5, sigmaY: 5.5),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        glass.withValues(alpha: .48),
-                        glass.withValues(alpha: .06),
-                      ],
-                    ),
-                  ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    glass.withValues(alpha: .48),
+                    glass.withValues(alpha: .06),
+                  ],
                 ),
               ),
             ),
@@ -1946,20 +1920,15 @@ class _ScrollEdgeFade extends StatelessWidget {
           bottom: 0,
           height: 11,
           child: IgnorePointer(
-            child: ClipRect(
-              child: BackdropFilter(
-                filter: ui.ImageFilter.blur(sigmaX: 5.5, sigmaY: 5.5),
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topCenter,
-                      end: Alignment.bottomCenter,
-                      colors: <Color>[
-                        glass.withValues(alpha: .06),
-                        glass.withValues(alpha: .48),
-                      ],
-                    ),
-                  ),
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: <Color>[
+                    glass.withValues(alpha: .06),
+                    glass.withValues(alpha: .48),
+                  ],
                 ),
               ),
             ),
@@ -3136,9 +3105,8 @@ class _MessageListState extends State<_MessageList> {
   late final ScrollController _scroll;
   late final String _conversationId;
   bool _stickToBottom = true;
-  bool _bottomSettleScheduled = false;
+  bool _bottomSyncScheduled = false;
   bool _reserveLegacyScrollbar = false;
-  bool _revealed = false;
 
   AppController get controller => widget.controller;
 
@@ -3152,16 +3120,29 @@ class _MessageListState extends State<_MessageList> {
       initialScrollOffset: restoring ? viewport?.offset ?? 0 : 0,
     );
     _stickToBottom = !restoring;
-    _revealed = restoring;
     _reserveLegacyScrollbar =
         restoring && (viewport?.reserveLegacyScrollbar ?? false);
     _scroll.addListener(_trackPosition);
+    controller.chatActivity.addListener(_onChatActivity);
     WidgetsBinding.instance.addPostFrameCallback((_) => _recordPosition());
+  }
+
+  @override
+  void didUpdateWidget(covariant _MessageList oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.controller == widget.controller) return;
+    oldWidget.controller.chatActivity.removeListener(_onChatActivity);
+    controller.chatActivity.addListener(_onChatActivity);
+  }
+
+  void _onChatActivity() {
+    if (mounted) setState(() {});
   }
 
   void _trackPosition() {
     if (!_scroll.hasClients) return;
-    _stickToBottom = _scroll.position.extentAfter < 140;
+    _stickToBottom =
+        _scroll.position.pixels <= _scroll.position.minScrollExtent + 140;
     _recordPosition();
   }
 
@@ -3177,6 +3158,7 @@ class _MessageListState extends State<_MessageList> {
   @override
   void dispose() {
     _recordPosition();
+    controller.chatActivity.removeListener(_onChatActivity);
     _scroll
       ..removeListener(_trackPosition)
       ..dispose();
@@ -3185,27 +3167,28 @@ class _MessageListState extends State<_MessageList> {
 
   @override
   Widget build(BuildContext context) {
-    final items = <ChatMessage>[...controller.messages];
-    if (controller.busy ||
+    final items = controller.messages;
+    final hasStreamingMessage =
+        controller.busy ||
         controller.streamingText.isNotEmpty ||
         controller.streamingReasoning.isNotEmpty ||
-        controller.streamingParts.isNotEmpty) {
-      items.add(
-        ChatMessage(
-          id: 'stream',
-          conversationId: controller.activeConversation?.id ?? '',
-          sequence: items.length + 1,
-          role: 'assistant',
-          content: controller.streamingText,
-          metadataJson: jsonEncode(<String, Object?>{
-            if (controller.streamingReasoning.isNotEmpty)
-              'reasoning': controller.streamingReasoning,
-          }),
-          createdAt: DateTime.now(),
-        ),
-      );
-    }
-    if (_stickToBottom) _scheduleBottomSettle();
+        controller.streamingParts.isNotEmpty;
+    final streamingMessage = hasStreamingMessage
+        ? ChatMessage(
+            id: 'stream',
+            conversationId: controller.activeConversation?.id ?? '',
+            sequence: items.length + 1,
+            role: 'assistant',
+            content: controller.streamingText,
+            metadataJson: jsonEncode(<String, Object?>{
+              if (controller.streamingReasoning.isNotEmpty)
+                'reasoning': controller.streamingReasoning,
+            }),
+            createdAt: DateTime.now(),
+          )
+        : null;
+    final itemCount = items.length + (hasStreamingMessage ? 1 : 0);
+    if (_stickToBottom) _scheduleBottomSync();
     final list = NotificationListener<ScrollStartNotification>(
       onNotification: (notification) {
         // Stop automatic bottom settling as soon as the user's drag begins.
@@ -3222,6 +3205,7 @@ class _MessageListState extends State<_MessageList> {
         child: ListView.builder(
           key: const Key('chat-message-list'),
           controller: _scroll,
+          reverse: true,
           keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
           padding: EdgeInsets.fromLTRB(
             18,
@@ -3231,60 +3215,56 @@ class _MessageListState extends State<_MessageList> {
             // contributes another 10px. The Flutter list flattens those nodes.
             22,
           ),
-          itemCount: items.length,
-          itemBuilder: (context, index) => Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 820),
-              child: _MessageBubble(
-                controller: controller,
-                message: items[index],
-                streaming: items[index].id == 'stream',
-                bottomSpacing: index == items.length - 1 ? 0 : 12,
+          itemCount: itemCount,
+          semanticChildCount: itemCount,
+          itemBuilder: (context, index) {
+            final sourceIndex = itemCount - 1 - index;
+            final message = sourceIndex < items.length
+                ? items[sourceIndex]
+                : streamingMessage!;
+            return KeyedSubtree(
+              key: ValueKey<String>('message-${message.id}'),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 820),
+                  child: _MessageBubble(
+                    controller: controller,
+                    message: message,
+                    streaming: message.id == 'stream',
+                    bottomSpacing: sourceIndex == itemCount - 1 ? 0 : 12,
+                  ),
+                ),
               ),
-            ),
-          ),
+            );
+          },
         ),
       ),
     );
-    return AnimatedOpacity(
-      opacity: _revealed ? 1 : 0,
-      duration: const Duration(milliseconds: 80),
-      curve: Curves.easeOut,
-      child: RepaintBoundary(child: list),
-    );
+    return RepaintBoundary(child: list);
   }
 
-  void _scheduleBottomSettle() {
-    if (_bottomSettleScheduled) return;
-    _bottomSettleScheduled = true;
+  void _scheduleBottomSync() {
+    if (_bottomSyncScheduled) return;
+    _bottomSyncScheduled = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _settleAtBottom(0);
+      _syncBottomAfterLayout();
     });
   }
 
-  void _settleAtBottom(int pass) {
-    if (!mounted || !_scroll.hasClients || !_stickToBottom) {
-      _bottomSettleScheduled = false;
-      if (mounted && !_revealed) setState(() => _revealed = true);
-      return;
-    }
+  void _syncBottomAfterLayout() {
+    _bottomSyncScheduled = false;
+    if (!mounted || !_scroll.hasClients) return;
     final reserveScrollbar = _scroll.position.maxScrollExtent > .5;
     if (reserveScrollbar != _reserveLegacyScrollbar) {
-      _bottomSettleScheduled = false;
       setState(() => _reserveLegacyScrollbar = reserveScrollbar);
       return;
     }
-    _scroll.jumpTo(_scroll.position.maxScrollExtent);
-    _recordPosition();
-    if (pass < 2) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _settleAtBottom(pass + 1);
-      });
-      WidgetsBinding.instance.scheduleFrame();
-      return;
+    if (_stickToBottom &&
+        (_scroll.position.pixels - _scroll.position.minScrollExtent).abs() >
+            .5) {
+      _scroll.jumpTo(_scroll.position.minScrollExtent);
     }
-    _bottomSettleScheduled = false;
-    if (!_revealed) setState(() => _revealed = true);
+    _recordPosition();
   }
 }
 
@@ -3883,7 +3863,11 @@ class _MessageBubble extends StatelessWidget {
     return effective.map<Widget>((part) {
       return switch (part.type) {
         'status' => _StatusCapsule(part: part),
-        'tool' => _ToolCapsule(part: part),
+        'tool' => _ToolCapsule(
+          part: part,
+          controller: controller,
+          messageId: message.id,
+        ),
         'thought' ||
         'thinking' ||
         'reasoning' when (part.content ?? '').isNotEmpty => _ThoughtBlock(
@@ -4033,7 +4017,12 @@ class _MessageVoiceBar extends StatelessWidget {
   final VoiceAsset asset;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<int>(
+    valueListenable: controller.audioPlaybackActivity,
+    builder: (context, _, _) => _buildBar(context),
+  );
+
+  Widget _buildBar(BuildContext context) {
     final dark = Theme.of(context).brightness == Brightness.dark;
     final playing = controller.playingVoiceId == asset.id;
     final duration = playing && controller.audioPlaybackDurationMs > 0
@@ -4070,23 +4059,12 @@ class _MessageVoiceBar extends StatelessWidget {
             ),
             const SizedBox(width: 7),
             Expanded(
-              child: SliderTheme(
-                data: SliderTheme.of(context).copyWith(
-                  trackHeight: 3,
-                  activeTrackColor: _accent,
-                  inactiveTrackColor: _accent.withValues(alpha: .18),
-                  thumbColor: _accent,
-                  thumbShape: const RoundSliderThumbShape(
-                    enabledThumbRadius: 6,
-                  ),
-                  overlayShape: SliderComponentShape.noOverlay,
-                ),
-                child: Slider(
-                  value: progress,
-                  onChanged: duration > 0
-                      ? (value) => unawaited(controller.seekVoice(asset, value))
-                      : null,
-                ),
+              child: _VoiceWaveformScrubber(
+                key: const Key('message-voice-waveform'),
+                progress: progress,
+                enabled: duration > 0,
+                onSeek: (value) =>
+                    unawaited(controller.seekVoice(asset, value)),
               ),
             ),
             SizedBox(
@@ -4935,10 +4913,194 @@ class _StatusCapsule extends StatelessWidget {
   }
 }
 
+class _VoiceWaveformScrubber extends StatefulWidget {
+  const _VoiceWaveformScrubber({
+    required this.progress,
+    required this.enabled,
+    required this.onSeek,
+    super.key,
+  });
+
+  final double progress;
+  final bool enabled;
+  final ValueChanged<double> onSeek;
+
+  @override
+  State<_VoiceWaveformScrubber> createState() => _VoiceWaveformScrubberState();
+}
+
+class _VoiceWaveformScrubberState extends State<_VoiceWaveformScrubber> {
+  late double _preview;
+  bool _dragging = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _preview = widget.progress.clamp(0.0, 1.0);
+  }
+
+  @override
+  void didUpdateWidget(covariant _VoiceWaveformScrubber oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!_dragging && oldWidget.progress != widget.progress) {
+      _preview = widget.progress.clamp(0.0, 1.0);
+    }
+  }
+
+  void _updateFromPosition(double dx, double width) {
+    if (!widget.enabled || width <= 0) return;
+    setState(() => _preview = (dx / width).clamp(0.0, 1.0));
+  }
+
+  void _commit() {
+    if (!widget.enabled) return;
+    _dragging = false;
+    widget.onSeek(_preview);
+  }
+
+  void _step(double amount) {
+    if (!widget.enabled) return;
+    setState(() => _preview = (_preview + amount).clamp(0.0, 1.0));
+    _commit();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final inactive = _accent.withValues(
+      alpha: Theme.of(context).brightness == Brightness.dark ? .3 : .2,
+    );
+    return Semantics(
+      slider: true,
+      enabled: widget.enabled,
+      value: '${(_preview * 100).round()}%',
+      increasedValue: '${((_preview + .05).clamp(0.0, 1.0) * 100).round()}%',
+      decreasedValue: '${((_preview - .05).clamp(0.0, 1.0) * 100).round()}%',
+      onIncrease: widget.enabled ? () => _step(.05) : null,
+      onDecrease: widget.enabled ? () => _step(-.05) : null,
+      child: LayoutBuilder(
+        builder: (context, constraints) => GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          excludeFromSemantics: true,
+          onTapDown: widget.enabled
+              ? (details) => _updateFromPosition(
+                  details.localPosition.dx,
+                  constraints.maxWidth,
+                )
+              : null,
+          onTapUp: widget.enabled ? (_) => _commit() : null,
+          onHorizontalDragStart: widget.enabled
+              ? (details) {
+                  _dragging = true;
+                  _updateFromPosition(
+                    details.localPosition.dx,
+                    constraints.maxWidth,
+                  );
+                }
+              : null,
+          onHorizontalDragUpdate: widget.enabled
+              ? (details) => _updateFromPosition(
+                  details.localPosition.dx,
+                  constraints.maxWidth,
+                )
+              : null,
+          onHorizontalDragEnd: widget.enabled ? (_) => _commit() : null,
+          onHorizontalDragCancel: widget.enabled
+              ? () {
+                  setState(() {
+                    _dragging = false;
+                    _preview = widget.progress.clamp(0.0, 1.0);
+                  });
+                }
+              : null,
+          child: CustomPaint(
+            painter: _VoiceWaveformPainter(
+              progress: _preview,
+              activeColor: _accent,
+              inactiveColor: inactive,
+            ),
+            child: const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _VoiceWaveformPainter extends CustomPainter {
+  const _VoiceWaveformPainter({
+    required this.progress,
+    required this.activeColor,
+    required this.inactiveColor,
+  });
+
+  static const _heights = <double>[
+    .26,
+    .48,
+    .72,
+    .42,
+    .84,
+    .58,
+    .96,
+    .68,
+    .38,
+    .76,
+    .54,
+    .9,
+    .62,
+    .44,
+    .78,
+    .5,
+  ];
+
+  final double progress;
+  final Color activeColor;
+  final Color inactiveColor;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    const gap = 2.2;
+    const preferredWidth = 2.4;
+    final count = math.max(1, (size.width / (preferredWidth + gap)).floor());
+    final barWidth = math.min(
+      preferredWidth,
+      (size.width - gap * math.max(0, count - 1)) / count,
+    );
+    final usedWidth = count * barWidth + math.max(0, count - 1) * gap;
+    final left = (size.width - usedWidth) / 2;
+    final activeEdge = size.width * progress.clamp(0.0, 1.0);
+    final paint = Paint();
+    for (var index = 0; index < count; index++) {
+      final x = left + index * (barWidth + gap);
+      final factor = _heights[index % _heights.length];
+      final height = math.max(4.0, size.height * factor);
+      final top = (size.height - height) / 2;
+      paint.color = x + barWidth / 2 <= activeEdge
+          ? activeColor
+          : inactiveColor;
+      canvas.drawRRect(
+        RRect.fromRectAndRadius(
+          Rect.fromLTWH(x, top, barWidth, height),
+          Radius.circular(barWidth),
+        ),
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _VoiceWaveformPainter oldDelegate) =>
+      oldDelegate.progress != progress ||
+      oldDelegate.activeColor != activeColor ||
+      oldDelegate.inactiveColor != inactiveColor;
+}
+
 class _ToolCapsule extends StatelessWidget {
-  const _ToolCapsule({required this.part});
+  const _ToolCapsule({required this.part, this.controller, this.messageId});
 
   final MessagePart part;
+  final AppController? controller;
+  final String? messageId;
 
   @override
   Widget build(BuildContext context) {
@@ -4969,7 +5131,7 @@ class _ToolCapsule extends StatelessWidget {
       'denied' => '小机子被拒绝了${_toolLabel(name)}',
       _ => '小机子出错了${_toolLabel(name)}',
     };
-    return _ExpandableCapsule(
+    final capsule = _ExpandableCapsule(
       icon: _toolIcon(name),
       label: label,
       color: status == 'success' || status == 'pending_approval'
@@ -4979,6 +5141,25 @@ class _ToolCapsule extends StatelessWidget {
       iconGap: 4,
       strongBorder: status == 'success' || status == 'pending_approval',
       dangerBorder: status != 'success' && status != 'pending_approval',
+    );
+    final argumentValues = arguments is Map ? arguments : const {};
+    final toolVoice = name == 'generate_voice' && status == 'success'
+        ? controller?.toolVoiceForCall(
+            messageId ?? '',
+            '${metadata['callId'] ?? ''}',
+            text: '${argumentValues['text'] ?? ''}',
+          )
+        : null;
+    if (toolVoice == null || controller == null) return capsule;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        capsule,
+        Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: _MessageVoiceBar(controller: controller!, asset: toolVoice),
+        ),
+      ],
     );
   }
 

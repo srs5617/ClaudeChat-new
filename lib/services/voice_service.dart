@@ -122,6 +122,8 @@ class VoiceAsset {
     required this.createdAt,
     required this.updatedAt,
     this.durationMs,
+    this.sourceKind = 'message',
+    this.toolCallId = '',
     this.sourceText = '',
     this.messageRole = '',
     this.conversationRoleName = '',
@@ -140,6 +142,8 @@ class VoiceAsset {
   final int byteSize;
   final String sha256;
   final int? durationMs;
+  final String sourceKind;
+  final String toolCallId;
   final bool favorite;
   final bool bound;
   final DateTime createdAt;
@@ -162,6 +166,8 @@ class VoiceAsset {
     byteSize: (map['byte_size'] as num).toInt(),
     sha256: '${map['sha256']}',
     durationMs: (map['duration_ms'] as num?)?.toInt(),
+    sourceKind: '${map['source_kind'] ?? 'message'}',
+    toolCallId: '${map['tool_call_id'] ?? ''}',
     favorite: map['is_favorite'] == 1 || map['is_favorite'] == true,
     bound: map['is_bound'] == 1 || map['is_bound'] == true,
     createdAt: DateTime.parse('${map['created_at']}'),
@@ -172,6 +178,8 @@ class VoiceAsset {
   );
 
   String get numberLabel => '#${libraryNumber.toString().padLeft(4, '0')}';
+
+  bool get isToolVoice => sourceKind == 'tool';
 
   String get roleName {
     final configured = conversationRoleName.trim();
@@ -303,7 +311,8 @@ class VoiceService {
   Future<VoiceAsset?> boundForMessage(String messageId) async {
     final rows = await store.database.query(
       'voice_assets',
-      where: 'deleted_at IS NULL AND message_id = ? AND is_bound = 1',
+      where:
+          "deleted_at IS NULL AND message_id = ? AND is_bound = 1 AND source_kind = 'message'",
       whereArgs: <Object?>[messageId],
       orderBy: 'updated_at DESC',
       limit: 1,
@@ -317,6 +326,8 @@ class VoiceService {
     required String text,
     VoiceProfile? profile,
     bool bind = true,
+    String sourceKind = 'message',
+    String toolCallId = '',
     Future<void>? abortTrigger,
     VoiceGenerationProgress? onProgress,
   }) async {
@@ -345,6 +356,8 @@ class VoiceService {
       profile: selected,
       generated: generated,
       bind: bind,
+      sourceKind: sourceKind,
+      toolCallId: toolCallId,
       onProgress: onProgress,
     );
   }
@@ -356,10 +369,14 @@ class VoiceService {
     required VoiceProfile profile,
     required GeneratedVoice generated,
     bool bind = true,
+    String sourceKind = 'message',
+    String toolCallId = '',
     VoiceGenerationProgress? onProgress,
   }) async {
     if (generated.bytes.isEmpty) throw const FormatException('语音接口返回了空音频');
     final id = _uuid.v4();
+    final normalizedSourceKind = sourceKind == 'tool' ? 'tool' : 'message';
+    final bindsToMessage = normalizedSourceKind == 'message' && bind;
     final numberRows = await store.database.rawQuery(
       'SELECT COALESCE(MAX(library_number), 0) AS value FROM voice_assets',
     );
@@ -377,12 +394,12 @@ class VoiceService {
     final now = DateTime.now().toUtc().toIso8601String();
     onProgress?.call('正在写入声音库…');
     await store.database.transaction((transaction) async {
-      if (bind) {
+      if (bindsToMessage) {
         await transaction.rawUpdate(
           'UPDATE voice_assets '
           'SET is_bound = 0, updated_at = ?, revision = revision + 1, '
           'origin_device_id = ? '
-          'WHERE message_id = ? AND deleted_at IS NULL AND is_bound = 1',
+          "WHERE message_id = ? AND deleted_at IS NULL AND is_bound = 1 AND source_kind = 'message'",
           <Object?>[now, store.deviceId, messageId],
         );
       }
@@ -396,13 +413,15 @@ class VoiceService {
         'model': profile.model,
         'voice_id': profile.voiceId,
         'generated_text': text.trim(),
+        'source_kind': normalizedSourceKind,
+        'tool_call_id': normalizedSourceKind == 'tool' ? toolCallId.trim() : '',
         'relative_path': relativePath,
         'media_type': generated.mediaType,
         'byte_size': generated.bytes.length,
         'sha256': digest,
         'duration_ms': null,
         'is_favorite': 0,
-        'is_bound': bind ? 1 : 0,
+        'is_bound': bindsToMessage ? 1 : 0,
         'created_at': now,
         'updated_at': now,
         'deleted_at': null,
@@ -416,13 +435,14 @@ class VoiceService {
   }
 
   Future<void> bind(VoiceAsset asset) async {
+    if (asset.isToolVoice) return;
     final now = DateTime.now().toUtc().toIso8601String();
     await store.database.transaction((transaction) async {
       await transaction.rawUpdate(
         'UPDATE voice_assets '
         'SET is_bound = 0, updated_at = ?, revision = revision + 1, '
         'origin_device_id = ? '
-        'WHERE message_id = ? AND deleted_at IS NULL AND is_bound = 1',
+        "WHERE message_id = ? AND deleted_at IS NULL AND is_bound = 1 AND source_kind = 'message'",
         <Object?>[now, store.deviceId, asset.messageId],
       );
       await transaction.rawUpdate(

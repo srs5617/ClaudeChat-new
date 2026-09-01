@@ -59,6 +59,41 @@ Future<void> ensureVoiceGeneratedTextSchema({
 }
 
 @visibleForTesting
+Future<void> ensureVoiceAssetSourceSchema({
+  required Future<void> Function(String sql) execute,
+  required Future<List<Map<String, Object?>>> Function(String sql) rawQuery,
+}) async {
+  final columns = await rawQuery('PRAGMA table_info(voice_assets)');
+  final names = columns.map((row) => row['name']).whereType<String>().toSet();
+  final addedSourceKind = !names.contains('source_kind');
+  if (addedSourceKind) {
+    await execute(
+      "ALTER TABLE voice_assets ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'message'",
+    );
+  }
+  if (!names.contains('tool_call_id')) {
+    await execute(
+      "ALTER TABLE voice_assets ADD COLUMN tool_call_id TEXT NOT NULL DEFAULT ''",
+    );
+  }
+  if (addedSourceKind) {
+    await execute("""UPDATE voice_assets
+      SET source_kind = 'tool'
+      WHERE TRIM(COALESCE(generated_text, '')) <> ''
+        AND EXISTS (
+          SELECT 1 FROM messages m
+          WHERE m.id = voice_assets.message_id
+            AND TRIM(COALESCE(voice_assets.generated_text, '')) <>
+                TRIM(COALESCE(m.content, ''))
+        )""");
+  }
+  await execute(
+    'CREATE INDEX IF NOT EXISTS idx_voice_assets_source '
+    'ON voice_assets(message_id, source_kind, tool_call_id)',
+  );
+}
+
+@visibleForTesting
 Future<void> ensureConversationArchiveSchema({
   required Future<void> Function(String sql) execute,
   required Future<List<Map<String, Object?>>> Function(String sql) rawQuery,
@@ -224,12 +259,26 @@ class AppDatabase {
             'applied_at': DateTime.now().toUtc().toIso8601String(),
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
         }
+        if (oldVersion < 7) {
+          await ensureVoiceAssetSourceSchema(
+            execute: database.execute,
+            rawQuery: database.rawQuery,
+          );
+          await database.insert('schema_migrations', <String, Object?>{
+            'version': 7,
+            'applied_at': DateTime.now().toUtc().toIso8601String(),
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+        }
       },
       // Repair a previously interrupted v2 migration without deleting data.
       // All statements are idempotent, so complete databases remain unchanged.
       onOpen: (database) async {
         await ensureVoiceSchema(execute: database.execute);
         await ensureVoiceGeneratedTextSchema(
+          execute: database.execute,
+          rawQuery: database.rawQuery,
+        );
+        await ensureVoiceAssetSourceSchema(
           execute: database.execute,
           rawQuery: database.rawQuery,
         );

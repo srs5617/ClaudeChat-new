@@ -302,6 +302,7 @@ class AppController extends ChangeNotifier {
   WorkspaceRecord? activeWorkspace;
   final ValueNotifier<int> workspaceActivity = ValueNotifier<int>(0);
   final ValueNotifier<int> chatActivity = ValueNotifier<int>(0);
+  final ValueNotifier<int> audioPlaybackActivity = ValueNotifier<int>(0);
   static const Duration _workspaceIdleLimit = Duration(minutes: 10);
   static const Set<String> _fileToolNames = <String>{
     'search_files',
@@ -967,8 +968,36 @@ class AppController extends ChangeNotifier {
       voiceProfiles.firstOrNull;
 
   VoiceAsset? voiceForMessage(String messageId) => voiceAssets
-      .where((value) => value.messageId == messageId && value.bound)
+      .where(
+        (value) =>
+            value.messageId == messageId && !value.isToolVoice && value.bound,
+      )
       .firstOrNull;
+
+  VoiceAsset? toolVoiceForCall(
+    String messageId,
+    String callId, {
+    String text = '',
+  }) {
+    final candidates = voiceAssets
+        .where((value) => value.messageId == messageId && value.isToolVoice)
+        .toList(growable: false);
+    final exact = candidates
+        .where(
+          (value) => callId.isNotEmpty && value.toolCallId.trim() == callId,
+        )
+        .firstOrNull;
+    if (exact != null) return exact;
+    final legacyText = text.trim();
+    if (legacyText.isEmpty) return null;
+    return candidates
+        .where(
+          (value) =>
+              value.toolCallId.trim().isEmpty &&
+              value.sourceText.trim() == legacyText,
+        )
+        .firstOrNull;
+  }
 
   String voiceProfileName(VoiceAsset asset) =>
       voiceProfiles
@@ -979,7 +1008,7 @@ class AppController extends ChangeNotifier {
       VoiceProviderInfo.fromKey(asset.provider).label;
 
   List<VoiceAsset> voicesForMessage(String messageId) => voiceAssets
-      .where((value) => value.messageId == messageId)
+      .where((value) => value.messageId == messageId && !value.isToolVoice)
       .toList(growable: false);
 
   String get activeModel =>
@@ -1584,6 +1613,7 @@ class AppController extends ChangeNotifier {
       notifyListeners();
     } on Object catch (error) {
       playingVoiceId = null;
+      _stopAudioProgress();
       notice = '播放失败：$error';
       notifyListeners();
     }
@@ -1600,6 +1630,7 @@ class AppController extends ChangeNotifier {
     _audioPlaybackTimer?.cancel();
     audioPlaybackPositionMs = 0;
     audioPlaybackDurationMs = 0;
+    _notifyAudioPlaybackActivity();
     _audioPlaybackTimer = Timer.periodic(
       const Duration(milliseconds: 350),
       (_) => unawaited(_refreshAudioProgress()),
@@ -1612,12 +1643,18 @@ class AppController extends ChangeNotifier {
     _audioPlaybackTimer = null;
     audioPlaybackPositionMs = 0;
     audioPlaybackDurationMs = 0;
+    _notifyAudioPlaybackActivity();
   }
+
+  void _notifyAudioPlaybackActivity() => audioPlaybackActivity.value++;
 
   Future<void> _refreshAudioProgress() async {
     if (playingVoiceId == null) return;
     try {
       final state = await platform.audioPlaybackState();
+      final progressChanged =
+          audioPlaybackPositionMs != state.positionMs ||
+          audioPlaybackDurationMs != state.durationMs;
       audioPlaybackPositionMs = state.positionMs;
       audioPlaybackDurationMs = state.durationMs;
       if (!state.playing &&
@@ -1625,8 +1662,10 @@ class AppController extends ChangeNotifier {
           state.positionMs >= state.durationMs) {
         playingVoiceId = null;
         _stopAudioProgress();
+        notifyListeners();
+        return;
       }
-      notifyListeners();
+      if (progressChanged) _notifyAudioPlaybackActivity();
     } on Object {
       // Older native shells keep basic playback working without seek state.
     }
@@ -1645,7 +1684,7 @@ class AppController extends ChangeNotifier {
     final position = (duration * value).round();
     await platform.seekAudio(position);
     audioPlaybackPositionMs = position;
-    notifyListeners();
+    _notifyAudioPlaybackActivity();
   }
 
   Future<void> bindVoice(VoiceAsset asset) async {
@@ -4686,15 +4725,16 @@ class AppController extends ChangeNotifier {
   Future<void> _persistPendingToolVoices(ChatMessage message) async {
     if (_pendingToolVoices.isEmpty) return;
     try {
-      for (var index = 0; index < _pendingToolVoices.length; index++) {
-        final pending = _pendingToolVoices[index];
+      for (final pending in _pendingToolVoices) {
         await voice.persistGenerated(
           messageId: message.id,
           conversationId: message.conversationId,
           text: pending.text,
           profile: pending.profile,
           generated: pending.generated,
-          bind: index == _pendingToolVoices.length - 1,
+          bind: false,
+          sourceKind: 'tool',
+          toolCallId: pending.callId,
         );
       }
       voiceAssets = await voice.assets();
