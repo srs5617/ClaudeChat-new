@@ -4011,7 +4011,11 @@ class _MessageBubble extends StatelessWidget {
 }
 
 class _MessageVoiceBar extends StatelessWidget {
-  const _MessageVoiceBar({required this.controller, required this.asset});
+  const _MessageVoiceBar({
+    super.key,
+    required this.controller,
+    required this.asset,
+  });
 
   final AppController controller;
   final VoiceAsset asset;
@@ -5143,10 +5147,11 @@ class _ToolCapsule extends StatelessWidget {
       dangerBorder: status != 'success' && status != 'pending_approval',
     );
     final argumentValues = arguments is Map ? arguments : const {};
+    final callId = '${metadata['callId'] ?? ''}';
     final toolVoice = name == 'generate_voice' && status == 'success'
         ? controller?.toolVoiceForCall(
             messageId ?? '',
-            '${metadata['callId'] ?? ''}',
+            callId,
             text: '${argumentValues['text'] ?? ''}',
           )
         : null;
@@ -5156,8 +5161,15 @@ class _ToolCapsule extends StatelessWidget {
       children: <Widget>[
         capsule,
         Padding(
-          padding: const EdgeInsets.only(top: 8),
-          child: _MessageVoiceBar(controller: controller!, asset: toolVoice),
+          // The capsule already owns 5 px of trailing space. Keep the same
+          // gap after the voice bar so consecutive capsule/voice pairs stay
+          // evenly spaced instead of leaving 13 px above and 0 px below.
+          padding: const EdgeInsets.only(bottom: 5),
+          child: _MessageVoiceBar(
+            key: ValueKey('tool-voice-bar-$callId'),
+            controller: controller!,
+            asset: toolVoice,
+          ),
         ),
       ],
     );

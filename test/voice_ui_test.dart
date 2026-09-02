@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:claudechat/app.dart';
 import 'package:claudechat/app_controller.dart';
+import 'package:claudechat/domain/entities.dart';
 import 'package:claudechat/services/voice_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -167,6 +170,132 @@ void main() {
 
     expect(find.byKey(const Key('message-voice-waveform')), findsOneWidget);
     expect(find.byType(Slider), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('consecutive tool voice rows keep balanced vertical spacing', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(480, 1200);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = AppController.visualAudit(
+      initialSection: AppSection.chat,
+      scenario: 'chat-rich',
+    );
+    addTearDown(controller.dispose);
+    final message = controller.messages.lastWhere(
+      (candidate) => candidate.role == 'assistant',
+    );
+    final timestamp = DateTime.utc(2026, 8, 19, 12);
+    MessagePart toolPart({
+      required String id,
+      required int sequence,
+      required String callId,
+      required String text,
+    }) => MessagePart(
+      id: id,
+      messageId: message.id,
+      sequence: sequence,
+      type: 'tool',
+      content: jsonEncode(<String, Object?>{'generated': true}),
+      metadataJson: jsonEncode(<String, Object?>{
+        'callId': callId,
+        'name': 'generate_voice',
+        'arguments': <String, Object?>{'text': text},
+        'status': 'success',
+      }),
+      createdAt: timestamp,
+    );
+    VoiceAsset toolVoice({
+      required String id,
+      required int libraryNumber,
+      required String callId,
+      required String text,
+    }) => VoiceAsset(
+      id: id,
+      libraryNumber: libraryNumber,
+      messageId: message.id,
+      conversationId: message.conversationId,
+      profileId: null,
+      provider: 'custom',
+      model: 'visual-audit',
+      voiceId: 'visual-audit',
+      relativePath: '$id.mp3',
+      mediaType: 'audio/mpeg',
+      byteSize: 128,
+      sha256: id,
+      durationMs: 11000,
+      favorite: false,
+      bound: true,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      sourceKind: 'tool',
+      toolCallId: callId,
+      sourceText: text,
+    );
+    controller.messagePartsByMessage[message.id] = <MessagePart>[
+      toolPart(
+        id: 'tool-voice-1',
+        sequence: 1,
+        callId: 'call-voice-1',
+        text: '第一段语音',
+      ),
+      toolPart(
+        id: 'tool-voice-2',
+        sequence: 2,
+        callId: 'call-voice-2',
+        text: '第二段语音',
+      ),
+      MessagePart(
+        id: 'tool-voice-content',
+        messageId: message.id,
+        sequence: 3,
+        type: 'content',
+        content: '两段语音已经生成。',
+        createdAt: timestamp,
+      ),
+    ];
+    controller.voiceAssets = <VoiceAsset>[
+      toolVoice(
+        id: 'tool-voice-asset-1',
+        libraryNumber: 1,
+        callId: 'call-voice-1',
+        text: '第一段语音',
+      ),
+      toolVoice(
+        id: 'tool-voice-asset-2',
+        libraryNumber: 2,
+        callId: 'call-voice-2',
+        text: '第二段语音',
+      ),
+    ];
+
+    await tester.pumpWidget(
+      ClaudeChatApp(controller: controller, skipSplash: true),
+    );
+    await tester.pumpAndSettle();
+
+    final firstLabel = find.text('小机子说了一段语音「第一段语音」');
+    final secondLabel = find.text('小机子说了一段语音「第二段语音」');
+    final firstBar = find.byKey(const Key('tool-voice-bar-call-voice-1'));
+    final secondBar = find.byKey(const Key('tool-voice-bar-call-voice-2'));
+    expect(firstLabel, findsOneWidget);
+    expect(secondLabel, findsOneWidget);
+    expect(firstBar, findsOneWidget);
+    expect(secondBar, findsOneWidget);
+    final gapAbove =
+        tester.getRect(firstBar).top - tester.getRect(firstLabel).bottom;
+    final gapBelow =
+        tester.getRect(secondLabel).top - tester.getRect(firstBar).bottom;
+    expect(gapAbove, inInclusiveRange(7, 11));
+    expect(gapBelow, inInclusiveRange(7, 11));
+    expect((gapAbove - gapBelow).abs(), lessThanOrEqualTo(1));
+    expect(
+      tester.getRect(firstBar).bottom,
+      lessThan(tester.getRect(secondBar).top),
+    );
     expect(tester.takeException(), isNull);
   });
 }
